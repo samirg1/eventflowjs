@@ -1,6 +1,6 @@
 {
   "name": "eventflowjs",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Lightweight event lifecycle logging for Node and browser apps",
   "type": "module",
   "main": "./dist/src/index.js",
