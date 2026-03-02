@@ -23,12 +23,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/samirg1/event-flow.git"
+    "url": "git+https://github.com/samirg1/eventflowjs.git"
   },
   "bugs": {
-    "url": "https://github.com/samirg1/event-flow/issues"
+    "url": "https://github.com/samirg1/eventflowjs/issues"
   },
-  "homepage": "https://github.com/samirg1/event-flow#readme",
+  "homepage": "https://github.com/samirg1/eventflowjs#readme",
   "engines": {
     "node": ">=18"
   },
