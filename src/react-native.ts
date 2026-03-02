@@ -30,6 +30,8 @@ export {
 export type {
   CallerInfo,
   ContextManager,
+  EventFlowClientConfig,
+  EventFlowClientConfigureOptions,
   EventContext,
   EventError,
   EventLog,

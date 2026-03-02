@@ -32,6 +32,13 @@ export interface EventLog {
   parentId?: string;
 }
 
+export interface EventFlowClientConfig {
+  showFullErrorStack: boolean;
+  branding: boolean;
+}
+
+export type EventFlowClientConfigureOptions = Partial<EventFlowClientConfig>;
+
 export type RunCallback<T> = (event: EventLog | null) => T | Promise<T>;
 
 export interface RunOptions {
@@ -71,6 +78,7 @@ export interface SerializedPropagationEvent {
 
 export interface Transport {
   log(event: EventLog): void;
+  configure?(config: EventFlowClientConfig): void;
 }
 
 export interface ContextState {

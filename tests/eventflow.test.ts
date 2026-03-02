@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ConsoleTransport,
   EventFlow,
   eventFlowMiddleware,
   extractEventFromHeaders,
@@ -28,6 +29,7 @@ describe("EventFlow", () => {
   beforeEach(() => {
     memory = new MemoryTransport();
     EventFlow.setTransport(memory);
+    EventFlow.configure({ showFullErrorStack: true, branding: true });
   });
 
   afterEach(() => {
@@ -91,6 +93,50 @@ describe("EventFlow", () => {
     expect(failed?.error?.message).toBe("boom");
     expect(failed?.error?.stack).toContain("Error: boom");
     expect(memory.events[0].status).toBe("failed");
+  });
+
+  it("truncates error stack to two lines when configured", () => {
+    EventFlow.configure({ showFullErrorStack: false });
+    EventFlow.startEvent("failure");
+
+    const error = new Error("boom");
+    error.stack = ["Error: boom", " at top", " at second", " at third"].join("\n");
+
+    const failed = EventFlow.fail(error);
+
+    expect(failed?.error?.stack).toBe("Error: boom\n at top");
+    expect(memory.events[0].error?.stack).toBe("Error: boom\n at top");
+  });
+
+  it("console transport includes branding prefix by default", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      EventFlow.setTransport(new ConsoleTransport());
+      EventFlow.startEvent("branding-default");
+      EventFlow.endEvent();
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0][0])).toContain("[Event");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("console transport omits branding prefix when disabled", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      EventFlow.setTransport(new ConsoleTransport());
+      EventFlow.configure({ branding: false });
+      EventFlow.startEvent("branding-off");
+      EventFlow.endEvent();
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      const output = String(spy.mock.calls[0][0]);
+      expect(output).not.toContain("[Event");
+      expect(output.trimStart().startsWith("{")).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("isolates active events across async flows", async () => {

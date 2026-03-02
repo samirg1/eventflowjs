@@ -11,6 +11,8 @@ import { generateId } from "./utils/generateId.js";
 import { getCallerInfo } from "./utils/getCallerInfo.js";
 import type {
   ContextManager,
+  EventFlowClientConfig,
+  EventFlowClientConfigureOptions,
   EventContext,
   EventLog,
   EventStatus,
@@ -29,12 +31,17 @@ import type {
 
 export class EventFlowClient {
   private transports: Transport[];
+  private config: EventFlowClientConfig = {
+    showFullErrorStack: true,
+    branding: true,
+  };
 
   constructor(
     private contextManager: ContextManager,
     transports: Transport[] = [new ConsoleTransport()],
   ) {
     this.transports = transports;
+    this.applyConfigToTransports();
   }
 
   startEvent(name: string): EventLog {
@@ -99,7 +106,10 @@ export class EventFlowClient {
       return null;
     }
 
-    const failed = EventRecord.fromLog(existing).fail(error);
+    const failedWithStack = EventRecord.fromLog(existing).fail(error);
+    const failed = this.config.showFullErrorStack
+      ? failedWithStack
+      : truncateErrorStack(failedWithStack, 2);
     this.emit(failed);
     this.contextManager.setCurrentEvent(null);
     return failed;
@@ -111,6 +121,15 @@ export class EventFlowClient {
 
   setTransport(transport: Transport | Transport[]): void {
     this.transports = Array.isArray(transport) ? transport : [transport];
+    this.applyConfigToTransports();
+  }
+
+  configure(options: EventFlowClientConfigureOptions): void {
+    this.config = {
+      ...this.config,
+      ...options,
+    };
+    this.applyConfigToTransports();
   }
 
   getPropagationHeaders(): Record<string, string> {
@@ -282,6 +301,12 @@ export class EventFlowClient {
       transport.log(event);
     }
   }
+
+  private applyConfigToTransports(): void {
+    for (const transport of this.transports) {
+      transport.configure?.(this.config);
+    }
+  }
 }
 
 function isEventLog(event: EventLog | SerializedPropagationEvent): event is EventLog {
@@ -290,6 +315,27 @@ function isEventLog(event: EventLog | SerializedPropagationEvent): event is Even
 
 function createTraceId(): string {
   return generateId().replace(/^evt_/, "trc_");
+}
+
+function truncateErrorStack(event: EventLog, maxLines: number): EventLog {
+  const eventError = event.error;
+  const stack = eventError?.stack;
+  if (!eventError || !stack) {
+    return event;
+  }
+
+  const lines = stack.split("\n");
+  if (lines.length <= maxLines) {
+    return event;
+  }
+
+  return {
+    ...event,
+    error: {
+      message: eventError.message,
+      stack: lines.slice(0, maxLines).join("\n"),
+    },
+  };
 }
 
 function parseRunArguments<T>(

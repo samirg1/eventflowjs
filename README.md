@@ -122,6 +122,18 @@ Useful options:
 - `endIfStarted` (default `true`): auto-end only the event started by this run.
 - `statusOnAutoEnd` (default `"success"`): status used when auto-ending.
 
+## Client Configuration
+
+Use `configure` to control client-level behavior:
+
+```ts
+EventFlow.configure({ showFullErrorStack: false });
+EventFlow.configure({ branding: false });
+```
+
+`showFullErrorStack` defaults to `true`. When set to `false`, emitted failed events include only the first two lines of `error.stack`.
+`branding` defaults to `true`. When set to `false`, `ConsoleTransport` logs raw JSON without the `[EventFlow]` prefix.
+
 ## Instrument Helper
 
 `EventFlow.instrument` creates a reusable wrapped function with the same error behavior as `run`.
@@ -253,6 +265,7 @@ Both primary mock apps are suitable for manual smoke testing of propagation flow
 | `step(name)` | Appends a step with elapsed time from event start. | `name: string` | `void` |
 | `endEvent(status?)` | Completes and emits the active event. | `status?: EventStatus` (default `"success"`) | `EventLog or null` |
 | `fail(error)` | Marks active event as failed, captures error, emits, clears current event. | `error: unknown` | `EventLog or null` |
+| `configure(options)` | Updates client-level behavior settings. | `options: EventFlowClientConfigureOptions` | `void` |
 | `getCurrentEvent()` | Returns current active event in context. | none | `EventLog or null` |
 | `setTransport(transport)` | Replaces transport(s) used for emitting events. | `transport: Transport or Transport[]` | `void` |
 | `getPropagationHeaders()` | Builds propagation headers from active event. | none | `Record<string, string>` |
@@ -274,6 +287,13 @@ Both primary mock apps are suitable for manual smoke testing of propagation flow
 | `eventName` | `string` | inferred | Event name used when auto-starting. |
 | `endIfStarted` | `boolean` | `true` | Auto-ends event only if this `run` started it. |
 | `statusOnAutoEnd` | `EventStatus` | `"success"` | Status used for auto-end path. |
+
+### `EventFlowClientConfigureOptions`
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `showFullErrorStack` | `boolean` | `true` | When `false`, failed events include only the first two lines of `error.stack`. |
+| `branding` | `boolean` | `true` | When `false`, `ConsoleTransport` logs plain JSON without the branding prefix. |
 
 ### `InstrumentOptions`
 
@@ -318,4 +338,4 @@ Both primary mock apps are suitable for manual smoke testing of propagation flow
 
 ### Exported Types
 
-`EventStatus`, `EventContext`, `Step`, `CallerInfo`, `EventError`, `EventLog`, `SerializedPropagationEvent`, `Transport`, `ContextManager`, `HeadersLike`, `RunCallback`, `RunOptions`, `InstrumentCallback`, `InstrumentedFunction`, `InstrumentOptions`, `PropagationMetadata`, `PropagationMetadataInput`, `PropagationMetadataOptions`, `EventFlowMiddleware`, `EventFlowMiddlewareOptions`, `NodeLikeRequest`, `NodeLikeResponse`, `NextFunction`.
+`EventStatus`, `EventContext`, `Step`, `CallerInfo`, `EventError`, `EventLog`, `EventFlowClientConfig`, `EventFlowClientConfigureOptions`, `SerializedPropagationEvent`, `Transport`, `ContextManager`, `HeadersLike`, `RunCallback`, `RunOptions`, `InstrumentCallback`, `InstrumentedFunction`, `InstrumentOptions`, `PropagationMetadata`, `PropagationMetadataInput`, `PropagationMetadataOptions`, `EventFlowMiddleware`, `EventFlowMiddlewareOptions`, `NodeLikeRequest`, `NodeLikeResponse`, `NextFunction`.
