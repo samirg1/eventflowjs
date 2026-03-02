@@ -44,6 +44,15 @@ export class EventFlowClient {
     this.applyConfigToTransports();
   }
 
+  /**
+   * Starts a new active event.
+   *
+   * If an event is already active in the current context, it is automatically
+   * completed with `cancelled` status and emitted before the new event starts.
+   *
+   * @param name Human-readable event name (for example, `checkout`).
+   * @returns The newly started event log snapshot.
+   */
   startEvent(name: string): EventLog {
     const existing = this.contextManager.getCurrentEvent();
     if (existing) {
@@ -66,6 +75,14 @@ export class EventFlowClient {
     return log;
   }
 
+  /**
+   * Adds structured context fields to the active event.
+   *
+   * Context is shallow-merged into existing context keys. If no event is active,
+   * this call is a no-op.
+   *
+   * @param data Key-value context fields to merge into the current event.
+   */
   addContext(data: EventContext): void {
     const existing = this.contextManager.getCurrentEvent();
     if (!existing) {
@@ -77,6 +94,14 @@ export class EventFlowClient {
     this.contextManager.setCurrentEvent(record.toLog());
   }
 
+  /**
+   * Records a lifecycle step on the active event.
+   *
+   * Step timing is measured as elapsed milliseconds from event start. If no
+   * event is active, this call is a no-op.
+   *
+   * @param name Step name to append.
+   */
   step(name: string): void {
     const existing = this.contextManager.getCurrentEvent();
     if (!existing) {
@@ -88,6 +113,12 @@ export class EventFlowClient {
     this.contextManager.setCurrentEvent(record.toLog());
   }
 
+  /**
+   * Ends and emits the active event.
+   *
+   * @param status Final event status. Defaults to `success`.
+   * @returns The completed event log, or `null` when no event is active.
+   */
   endEvent(status: EventStatus = "success"): EventLog | null {
     const existing = this.contextManager.getCurrentEvent();
     if (!existing) {
@@ -100,6 +131,17 @@ export class EventFlowClient {
     return completed;
   }
 
+  /**
+   * Marks the active event as failed, captures error details, emits it, and
+   * clears the active context.
+   *
+   * Behavior respects client config:
+   * - `showFullErrorStack: true` (default): keep full stack trace
+   * - `showFullErrorStack: false`: keep only the first two stack lines
+   *
+   * @param error Unknown thrown value to capture.
+   * @returns The failed event log, or `null` when no event is active.
+   */
   fail(error: unknown): EventLog | null {
     const existing = this.contextManager.getCurrentEvent();
     if (!existing) {
@@ -115,15 +157,36 @@ export class EventFlowClient {
     return failed;
   }
 
+  /**
+   * Returns the active event for the current context.
+   *
+   * @returns Current event log, or `null` if none is active.
+   */
   getCurrentEvent(): EventLog | null {
     return this.contextManager.getCurrentEvent();
   }
 
+  /**
+   * Replaces the active transport(s) used when events are emitted.
+   *
+   * The current client configuration is applied to new transports when set.
+   *
+   * @param transport One transport or an array of transports.
+   */
   setTransport(transport: Transport | Transport[]): void {
     this.transports = Array.isArray(transport) ? transport : [transport];
     this.applyConfigToTransports();
   }
 
+  /**
+   * Updates client-level runtime behavior.
+   *
+   * Current supported options:
+   * - `showFullErrorStack` (default `true`)
+   * - `branding` (default `true`, used by `ConsoleTransport`)
+   *
+   * @param options Partial configuration values to merge with current config.
+   */
   configure(options: EventFlowClientConfigureOptions): void {
     this.config = {
       ...this.config,
@@ -132,6 +195,14 @@ export class EventFlowClient {
     this.applyConfigToTransports();
   }
 
+  /**
+   * Builds propagation headers from the active event.
+   *
+   * These headers can be attached to outgoing HTTP requests so downstream
+   * services can continue the same event/trace.
+   *
+   * @returns Header map, or an empty object when no event is active.
+   */
   getPropagationHeaders(): Record<string, string> {
     const existing = this.contextManager.getCurrentEvent();
     if (!existing) {
@@ -141,6 +212,14 @@ export class EventFlowClient {
     return getPropagationHeaders(existing);
   }
 
+  /**
+   * Extracts an event payload from incoming propagation headers and attaches it
+   * as the active event in the current context.
+   *
+   * @param headers Incoming request headers.
+   * @returns Attached event log, or `null` if headers do not contain a valid
+   * propagation payload.
+   */
   fromHeaders(headers: HeadersLike): EventLog | null {
     const extracted = extractEventFromHeaders(headers);
     if (!extracted) {
@@ -150,6 +229,15 @@ export class EventFlowClient {
     return this.attach(extracted);
   }
 
+  /**
+   * Serializes an event into a continuation token.
+   *
+   * Use this when handing event state from one boundary to another (for example,
+   * server -> client continuation flows).
+   *
+   * @param event Optional explicit event. Defaults to the active event.
+   * @returns Serialized token, or `null` when no target event exists.
+   */
   getContinuationToken(event?: EventLog): string | null {
     const target = event ?? this.contextManager.getCurrentEvent();
     if (!target) {
@@ -159,6 +247,12 @@ export class EventFlowClient {
     return serializeEvent(target);
   }
 
+  /**
+   * Restores and attaches an event from a continuation token.
+   *
+   * @param token Serialized event token from `getContinuationToken`.
+   * @returns Attached event log, or `null` if parsing fails.
+   */
   continueFromToken(token: string): EventLog | null {
     const parsed = deserializeEvent(token);
     if (!parsed) {
@@ -168,6 +262,14 @@ export class EventFlowClient {
     return this.attach(parsed);
   }
 
+  /**
+   * Builds metadata fields for providers that support generic key-value
+   * metadata (for example, payment providers and webhook-capable systems).
+   *
+   * @param event Optional explicit event. Defaults to the active event.
+   * @param options Metadata shaping options.
+   * @returns Metadata object, or an empty object when no target event exists.
+   */
   getPropagationMetadata(
     event?: EventLog,
     options?: PropagationMetadataOptions,
@@ -180,6 +282,13 @@ export class EventFlowClient {
     return getPropagationMetadata(target, options);
   }
 
+  /**
+   * Extracts an event from generic metadata fields and attaches it as active.
+   *
+   * @param metadata Provider metadata map.
+   * @returns Attached event log, or `null` if metadata does not contain a valid
+   * propagation payload.
+   */
   fromMetadata(metadata: PropagationMetadataInput): EventLog | null {
     const extracted = extractEventFromMetadata(metadata);
     if (!extracted) {
@@ -189,10 +298,32 @@ export class EventFlowClient {
     return this.attach(extracted);
   }
 
+  /**
+   * Runs a callback with optional step tracking and error lifecycle handling.
+   *
+   * Supported signatures:
+   * - `run(fn, options?)`
+   * - `run(stepName, fn, options?)`
+   *
+   * On thrown errors, the callback error is rethrown after optional event
+   * failure handling (`failEventOnError`, default `true`).
+   *
+   * @param fn Callback to execute.
+   * @param options Runtime behavior options for this invocation.
+   * @returns Callback result.
+   */
   async run<T>(
     fn: RunCallback<T>,
     options?: RunOptions,
   ): Promise<Awaited<T>>;
+  /**
+   * Runs a callback while recording a named step before execution.
+   *
+   * @param stepName Step name to record.
+   * @param fn Callback to execute.
+   * @param options Runtime behavior options for this invocation.
+   * @returns Callback result.
+   */
   async run<T>(
     stepName: string,
     fn: RunCallback<T>,
@@ -246,6 +377,20 @@ export class EventFlowClient {
     }
   }
 
+  /**
+   * Wraps a function with EventFlow lifecycle instrumentation for reuse.
+   *
+   * The returned function:
+   * - auto-starts an event when missing (default)
+   * - records a step for each invocation
+   * - auto-ends if the wrapper started the event (default)
+   * - fails + rethrows on callback errors (default)
+   *
+   * @param eventName Event name for auto-started events.
+   * @param fn Function to instrument.
+   * @param options Instrument behavior and context hooks.
+   * @returns An async function that executes the wrapped lifecycle behavior.
+   */
   instrument<TArgs extends unknown[], TResult>(
     eventName: string,
     fn: InstrumentCallback<TArgs, TResult>,
@@ -285,6 +430,15 @@ export class EventFlowClient {
     };
   }
 
+  /**
+   * Attaches an existing event payload as the current active event.
+   *
+   * Useful for continuing an event that was previously serialized, propagated,
+   * or reconstructed from external data.
+   *
+   * @param event Full event log or serialized propagation shape.
+   * @returns The attached event log snapshot.
+   */
   attach(event: EventLog | SerializedPropagationEvent): EventLog {
     const record = isEventLog(event)
       ? EventRecord.fromLog(event)
