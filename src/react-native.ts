@@ -2,7 +2,7 @@ import { BrowserContext } from "./context/BrowserContext.js";
 import { EventFlowClient } from "./EventFlow.js";
 import { createEventFlowMiddleware } from "./middleware/node.js";
 
-export const EventFlow = new EventFlowClient(new BrowserContext());
+export const EventFlow: EventFlowClient<never> = new EventFlowClient(new BrowserContext());
 export const eventFlowMiddleware = createEventFlowMiddleware(EventFlow);
 
 export { EventFlowClient };
@@ -32,6 +32,7 @@ export type {
   ContextManager,
   EventFlowClientConfig,
   EventFlowClientConfigureOptions,
+  EventFlowClientConfigureWithUserContext,
   EventContext,
   EventError,
   EventLog,
@@ -48,6 +49,7 @@ export type {
   SerializedPropagationEvent,
   Step,
   Transport,
+  UserContextMapper,
 } from "./types.js";
 export type {
   EventFlowMiddleware,

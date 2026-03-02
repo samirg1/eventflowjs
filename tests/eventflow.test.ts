@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ConsoleTransport,
   EventFlow,
+  type EventFlowClient,
   eventFlowMiddleware,
   extractEventFromHeaders,
   serializeEvent,
@@ -29,7 +30,19 @@ describe("EventFlow", () => {
   beforeEach(() => {
     memory = new MemoryTransport();
     EventFlow.setTransport(memory);
-    EventFlow.configure({ showFullErrorStack: true, branding: true });
+    (
+      EventFlow as unknown as {
+        configure(options: {
+          showFullErrorStack?: boolean;
+          branding?: boolean;
+          getUserContext?: undefined;
+        }): void;
+      }
+    ).configure({
+      showFullErrorStack: true,
+      branding: true,
+      getUserContext: undefined,
+    });
   });
 
   afterEach(() => {
@@ -69,6 +82,89 @@ describe("EventFlow", () => {
       b: 2,
       nested: { overwrite: true },
     });
+  });
+
+  it("adds mapped user context under context.user", () => {
+    type Account = { uid: string; email: string };
+
+    EventFlow.configure({
+      getUserContext: (account: Account) => ({
+        email: account.email,
+        id: account.uid,
+      }),
+    });
+
+    EventFlow.startEvent("user-context");
+    EventFlow.addUserContext({ uid: "u_1", email: "test@example.com" });
+    const ended = EventFlow.endEvent();
+
+    expect(ended?.context.user).toEqual({
+      email: "test@example.com",
+      id: "u_1",
+    });
+  });
+
+  it("throws when addUserContext is called before configuring getUserContext", () => {
+    const untyped = EventFlow as unknown as EventFlowClient<unknown>;
+    expect(() => untyped.addUserContext({ uid: "u_1" })).toThrow(
+      "EventFlow.addUserContext requires configure({ getUserContext }) before use.",
+    );
+  });
+
+  it("addUserContext is a no-op with no active event", () => {
+    type Account = { uid: string; email: string };
+
+    EventFlow.configure({
+      getUserContext: (account: Account) => ({
+        email: account.email,
+        id: account.uid,
+      }),
+    });
+
+    EventFlow.addUserContext({ uid: "u_2", email: "noevent@example.com" });
+
+    expect(EventFlow.getCurrentEvent()).toBeNull();
+    expect(memory.events).toHaveLength(0);
+  });
+
+  it("warns and overwrites existing context.user when adding user context", () => {
+    type Account = { uid: string; email: string };
+
+    EventFlow.configure({
+      getUserContext: (account: Account) => ({
+        email: account.email,
+        id: account.uid,
+      }),
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      EventFlow.startEvent("overwrite-user-context");
+      EventFlow.addContext({ user: { legacy: true } });
+      EventFlow.addUserContext({ uid: "u_3", email: "overwrite@example.com" });
+      const ended = EventFlow.endEvent();
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(ended?.context.user).toEqual({
+        email: "overwrite@example.com",
+        id: "u_3",
+      });
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("throws when getUserContext returns a non-object value", () => {
+    type Account = { uid: string };
+
+    EventFlow.configure({
+      getUserContext: (_account: Account) => "invalid" as unknown as Record<string, unknown>,
+    });
+
+    EventFlow.startEvent("invalid-user-context");
+    expect(() => EventFlow.addUserContext({ uid: "u_4" })).toThrow(
+      "EventFlow getUserContext must return a non-null object.",
+    );
   });
 
   it("records step timing from start", async () => {

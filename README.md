@@ -127,12 +127,33 @@ Useful options:
 Use `configure` to control client-level behavior:
 
 ```ts
-EventFlow.configure({ showFullErrorStack: false });
-EventFlow.configure({ branding: false });
+import { EventFlow, type EventFlowClient } from "eventflowjs";
+
+const AppEventFlow: EventFlowClient<never> = EventFlow;
+
+AppEventFlow.configure({ showFullErrorStack: false });
+AppEventFlow.configure({ branding: false });
+
+type Account = { uid: string; email: string };
+
+AppEventFlow.configure({
+  getUserContext: (account: Account) => ({
+    email: account.email,
+    id: account.uid,
+  }),
+});
+
+AppEventFlow.startEvent("checkout");
+AppEventFlow.addUserContext({ uid: "u_123", email: "user@example.com" });
+AppEventFlow.endEvent();
 ```
 
 `showFullErrorStack` defaults to `true`. When set to `false`, emitted failed events include only the first two lines of `error.stack`.
 `branding` defaults to `true`. When set to `false`, `ConsoleTransport` logs raw JSON without the `[EventFlow]` prefix.
+`getUserContext` configures `addUserContext(account)` to map your app-level user/account object into `context.user`.
+When `context.user` already exists, `addUserContext` overwrites it and logs a warning.
+
+TypeScript note: assertion-based narrowing requires an explicitly typed local reference (for example, `const AppEventFlow: EventFlowClient<never> = EventFlow;`). Configure and use that reference in the same scope for typed `addUserContext(...)` calls.
 
 ## Instrument Helper
 
@@ -262,6 +283,7 @@ Both primary mock apps are suitable for manual smoke testing of propagation flow
 | --- | --- | --- | --- |
 | `startEvent(name)` | Starts a new event. Auto-cancels and emits any currently active event first. | `name: string` | `EventLog` |
 | `addContext(data)` | Shallow-merges context into the active event. No-op if no active event exists. | `data: EventContext` | `void` |
+| `addUserContext(account)` | Maps a configured user/account object and writes it to `context.user`. Throws if `getUserContext` is not configured. No-op if no event is active. | `account: TAccount` | `void` |
 | `step(name)` | Appends a step with elapsed time from event start. | `name: string` | `void` |
 | `endEvent(status?)` | Completes and emits the active event. | `status?: EventStatus` (default `"success"`) | `EventLog or null` |
 | `fail(error)` | Marks active event as failed, captures error, emits, clears current event. | `error: unknown` | `EventLog or null` |
@@ -294,6 +316,14 @@ Both primary mock apps are suitable for manual smoke testing of propagation flow
 | --- | --- | --- | --- |
 | `showFullErrorStack` | `boolean` | `true` | When `false`, failed events include only the first two lines of `error.stack`. |
 | `branding` | `boolean` | `true` | When `false`, `ConsoleTransport` logs plain JSON without the branding prefix. |
+
+### `EventFlowClientConfigureWithUserContext<TAccount>`
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `showFullErrorStack` | `boolean` | `true` | Same as `EventFlowClientConfigureOptions`. |
+| `branding` | `boolean` | `true` | Same as `EventFlowClientConfigureOptions`. |
+| `getUserContext` | `(account: TAccount) => EventContext` | required | Maps your user/account object into the payload used by `addUserContext(account)` at `context.user`. |
 
 ### `InstrumentOptions`
 
@@ -338,4 +368,4 @@ Both primary mock apps are suitable for manual smoke testing of propagation flow
 
 ### Exported Types
 
-`EventStatus`, `EventContext`, `Step`, `CallerInfo`, `EventError`, `EventLog`, `EventFlowClientConfig`, `EventFlowClientConfigureOptions`, `SerializedPropagationEvent`, `Transport`, `ContextManager`, `HeadersLike`, `RunCallback`, `RunOptions`, `InstrumentCallback`, `InstrumentedFunction`, `InstrumentOptions`, `PropagationMetadata`, `PropagationMetadataInput`, `PropagationMetadataOptions`, `EventFlowMiddleware`, `EventFlowMiddlewareOptions`, `NodeLikeRequest`, `NodeLikeResponse`, `NextFunction`.
+`EventStatus`, `EventContext`, `Step`, `CallerInfo`, `EventError`, `EventLog`, `EventFlowClientConfig`, `EventFlowClientConfigureOptions`, `EventFlowClientConfigureWithUserContext`, `UserContextMapper`, `SerializedPropagationEvent`, `Transport`, `ContextManager`, `HeadersLike`, `RunCallback`, `RunOptions`, `InstrumentCallback`, `InstrumentedFunction`, `InstrumentOptions`, `PropagationMetadata`, `PropagationMetadataInput`, `PropagationMetadataOptions`, `EventFlowMiddleware`, `EventFlowMiddlewareOptions`, `NodeLikeRequest`, `NodeLikeResponse`, `NextFunction`.

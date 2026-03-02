@@ -13,6 +13,7 @@ import type {
   ContextManager,
   EventFlowClientConfig,
   EventFlowClientConfigureOptions,
+  EventFlowClientConfigureWithUserContext,
   EventContext,
   EventLog,
   EventStatus,
@@ -27,14 +28,17 @@ import type {
   RunOptions,
   SerializedPropagationEvent,
   Transport,
+  UserContextMapper,
 } from "./types.js";
 
-export class EventFlowClient {
+export class EventFlowClient<TAccount = never> {
   private transports: Transport[];
+  private declare readonly __userContextType: (account: TAccount) => TAccount;
   private config: EventFlowClientConfig = {
     showFullErrorStack: true,
     branding: true,
   };
+  private userContextMapper?: UserContextMapper<unknown>;
 
   constructor(
     private contextManager: ContextManager,
@@ -92,6 +96,42 @@ export class EventFlowClient {
     const record = EventRecord.fromLog(existing);
     record.mergeContext(data);
     this.contextManager.setCurrentEvent(record.toLog());
+  }
+
+  /**
+   * Maps and adds a user/account object to `context.user` for the active event.
+   *
+   * Requires `configure({ getUserContext })` to be set first. If no event is
+   * active, this call is a no-op.
+   *
+   * @param account User/account object expected by configured mapper.
+   */
+  addUserContext(account: TAccount): void {
+    if (!this.userContextMapper) {
+      throw new TypeError(
+        "EventFlow.addUserContext requires configure({ getUserContext }) before use.",
+      );
+    }
+
+    const existing = this.contextManager.getCurrentEvent();
+    if (!existing) {
+      return;
+    }
+
+    const mapped = this.userContextMapper(account);
+    if (typeof mapped !== "object" || mapped === null) {
+      throw new TypeError(
+        "EventFlow getUserContext must return a non-null object.",
+      );
+    }
+
+    if (existing.context.user !== undefined) {
+      console.warn(
+        "EventFlow.addUserContext overwriting existing context.user value.",
+      );
+    }
+
+    this.addContext({ user: mapped as EventContext });
   }
 
   /**
@@ -187,10 +227,30 @@ export class EventFlowClient {
    *
    * @param options Partial configuration values to merge with current config.
    */
-  configure(options: EventFlowClientConfigureOptions): void {
+  configure(options: EventFlowClientConfigureOptions): void;
+  configure<TNextAccount>(
+    options: EventFlowClientConfigureWithUserContext<TNextAccount>,
+  ): asserts this is EventFlowClient<TNextAccount>;
+  configure(
+    options:
+      | EventFlowClientConfigureOptions
+      | EventFlowClientConfigureWithUserContext<unknown>,
+  ): void {
+    if ("getUserContext" in options) {
+      this.userContextMapper = options.getUserContext;
+    }
+
+    const nextConfig: Partial<EventFlowClientConfig> = {};
+    if (options.showFullErrorStack !== undefined) {
+      nextConfig.showFullErrorStack = options.showFullErrorStack;
+    }
+    if (options.branding !== undefined) {
+      nextConfig.branding = options.branding;
+    }
+
     this.config = {
       ...this.config,
-      ...options,
+      ...nextConfig,
     };
     this.applyConfigToTransports();
   }

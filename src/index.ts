@@ -10,7 +10,7 @@ if (isNodeRuntime()) {
   contextManager = new AsyncContext();
 }
 
-export const EventFlow = new EventFlowClient(contextManager);
+export const EventFlow: EventFlowClient<never> = new EventFlowClient(contextManager);
 export const eventFlowMiddleware = createEventFlowMiddleware(EventFlow);
 
 export { EventFlowClient };
@@ -40,6 +40,7 @@ export type {
   ContextManager,
   EventFlowClientConfig,
   EventFlowClientConfigureOptions,
+  EventFlowClientConfigureWithUserContext,
   EventContext,
   EventError,
   EventLog,
@@ -56,6 +57,7 @@ export type {
   SerializedPropagationEvent,
   Step,
   Transport,
+  UserContextMapper,
 } from "./types.js";
 export type {
   EventFlowMiddleware,

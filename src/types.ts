@@ -37,7 +37,16 @@ export interface EventFlowClientConfig {
   branding: boolean;
 }
 
-export type EventFlowClientConfigureOptions = Partial<EventFlowClientConfig>;
+export type UserContextMapper<TAccount> = (account: TAccount) => EventContext;
+
+export type EventFlowClientConfigureOptions = Partial<EventFlowClientConfig> & {
+  getUserContext?: never;
+};
+
+export type EventFlowClientConfigureWithUserContext<TAccount> =
+  Partial<EventFlowClientConfig> & {
+    getUserContext: UserContextMapper<TAccount>;
+  };
 
 export type RunCallback<T> = (event: EventLog | null) => T | Promise<T>;
 
