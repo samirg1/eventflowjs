@@ -1,0 +1,73 @@
+{
+  "name": "eventflowjs",
+  "version": "0.1.0",
+  "description": "Lightweight event lifecycle logging for Node and browser apps",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "react-native": "./dist/src/react-native.js",
+  "module": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "react-native": "./dist/src/react-native.js",
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
+    },
+    "./react-native": {
+      "types": "./dist/src/react-native.d.ts",
+      "import": "./dist/src/react-native.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/samirg1/event-flow.git"
+  },
+  "bugs": {
+    "url": "https://github.com/samirg1/event-flow/issues"
+  },
+  "homepage": "https://github.com/samirg1/event-flow#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist/src",
+    "Logo.png",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check": "npm run build && npm run test",
+    "pack:check": "npm pack --dry-run --cache /tmp/eventflow-npm-cache",
+    "prepublishOnly": "npm run check && npm run pack:check",
+    "example": "npm run build && node dist/examples/basic.js",
+    "example:server": "npm run build && node dist/examples/server.js",
+    "example:browser": "npm run build && node dist/examples/browser.js",
+    "example:fullstack": "npm run build && node dist/examples/fullstack.js",
+    "example:webhook": "npm run build && node dist/examples/webhook.js",
+    "example:production-api": "npm run build && node dist/examples/production-api.js",
+    "example:checkout-orchestration": "npm run build && node dist/examples/checkout-orchestration.js",
+    "example:worker-retries": "npm run build && node dist/examples/worker-retries.js",
+    "example:mock-todo-web": "npm run build && node examples/mock-todo-web/server.mjs"
+  },
+  "keywords": [
+    "logging",
+    "events",
+    "tracing",
+    "typescript"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EventFlow Mock Todo Web App</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel app-panel">
+        <h1>Todo App (Web)</h1>
+        <p class="subtext">
+          This mock app uses EventFlow for lifecycle logging across browser actions,
+          API calls, and webhook simulation.
+        </p>
+
+        <form id="todo-form" class="todo-form">
+          <input id="todo-input" type="text" placeholder="Add a todo..." required />
+          <button type="submit">Add</button>
+        </form>
+
+        <ul id="todo-list" class="todo-list"></ul>
+
+        <button id="simulate-webhook" class="secondary">
+          Simulate Provider Webhook
+        </button>
+      </section>
+
+      <section class="panel debug-panel">
+        <h2>Event Debugger</h2>
+        <div class="debug-grid">
+          <div>
+            <h3>Client Active Event</h3>
+            <pre id="client-active">(none)</pre>
+          </div>
+
+          <div>
+            <h3>Client Emitted Events</h3>
+            <pre id="client-emitted">[]</pre>
+          </div>
+
+          <div>
+            <h3>Server Emitted Events (Live)</h3>
+            <pre id="server-emitted">[]</pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

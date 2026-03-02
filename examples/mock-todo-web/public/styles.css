@@ -1,0 +1,128 @@
+:root {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: #1b1f23;
+  background: linear-gradient(135deg, #edf5ff 0%, #fef6e7 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(420px, 1.2fr);
+  gap: 16px;
+  padding: 16px;
+}
+
+.panel {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #dce4ef;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 10px 22px rgba(23, 42, 76, 0.08);
+}
+
+.subtext {
+  margin-top: 0;
+  color: #4f5b6b;
+}
+
+.todo-form {
+  display: flex;
+  gap: 8px;
+}
+
+input,
+button {
+  border-radius: 8px;
+  border: 1px solid #b3c4dd;
+  padding: 10px;
+  font-size: 14px;
+}
+
+input {
+  flex: 1;
+}
+
+button {
+  cursor: pointer;
+  background: #0b5dff;
+  border-color: #0b5dff;
+  color: #fff;
+  font-weight: 600;
+}
+
+button.secondary {
+  margin-top: 12px;
+  background: #f1f5fb;
+  border-color: #b8c9e4;
+  color: #1f2f44;
+}
+
+.todo-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: #f7faff;
+  border: 1px solid #d6e2f2;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.todo-item.done .text {
+  text-decoration: line-through;
+  color: #63768f;
+}
+
+.todo-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.todo-actions button {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.debug-grid {
+  display: grid;
+  gap: 12px;
+}
+
+pre {
+  margin: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: #0b1220;
+  color: #d3f8ff;
+  max-height: 200px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 10px;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}

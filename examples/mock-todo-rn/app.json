@@ -1,0 +1,9 @@
+{
+  "expo": {
+    "name": "EventFlow Mock Todo RN",
+    "slug": "eventflow-mock-todo-rn",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android", "web"]
+  }
+}
