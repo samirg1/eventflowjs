@@ -1,39 +1,45 @@
-# Mock Todo Web App
+# Mock Todo Web App (Browser-Only Demo)
 
 ## What This Demonstrates
 
-- Browser lifecycle tracking for todo CRUD actions.
-- Header-based propagation from browser to Node API.
-- Continuation token handoff from server back to client.
-- Metadata-based continuation for webhook-style processing.
-- Live event debugger panels for client and server emitted events.
+- Full lifecycle logging with `startEvent`, `addContext`, `step`, `endEvent`, and `fail`.
+- Header propagation into a mock API (`getPropagationHeaders` -> `fromHeaders`).
+- Continuation token handoff (`getContinuationToken` -> `continueFromToken`).
+- Metadata continuation for webhook-style flows (`getPropagationMetadata` -> `fromMetadata`).
+- `run(...)` and `instrument(...)` helpers in both client and mock server paths.
+- Custom transports collecting emitted client/server events for live debugger panels.
+
+## Architecture
+
+- `public/app.js`: browser UI and EventFlow client flow orchestration.
+- `server.mjs`: in-memory mock API module using a dedicated `EventFlowClient`.
+- No HTTP server process is required for API behavior. The browser calls the mock server directly.
 
 ## Prerequisites
 
 - Node.js 18+
-- Project dependencies installed from the repository root (`npm install`)
+- Repo dependencies installed (`npm install`)
 
 ## Run Locally
 
-From the repository root:
+From repository root:
 
 ```bash
 npm run build
-node examples/mock-todo-web/server.mjs
+python3 -m http.server 4310
 ```
 
-Then open: `http://127.0.0.1:4310`
+Open:
+
+- `http://127.0.0.1:4310/examples/mock-todo-web/public/index.html`
 
 ## What To Try
 
-1. Add, toggle, and delete todos from the UI.
-2. Watch `Client Active Event` update as each action progresses.
-3. Watch `Client Emitted Events` and `Server Emitted Events` when events emit.
-4. Click `Simulate Provider Webhook` to test metadata continuation.
-
-## Testing Note
-
-This mock app is suitable for manual smoke testing of propagation behavior across `headers`, `continuationToken`, and `metadata`.
+1. Create, toggle, and delete todos.
+2. Click **Simulate Checkout Flow** to see propagation and continuation token flow.
+3. Click **Simulate Webhook Flow** to see metadata continuation flow.
+4. Click **Simulate Failure Flow** to generate failed lifecycle events.
+5. Inspect `Client Active Event`, `Client Emitted Events`, and `Server Emitted Events`.
 
 ## Companion Mobile Demo
 

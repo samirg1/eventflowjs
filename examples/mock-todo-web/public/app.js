@@ -1,46 +1,108 @@
-import { ConsoleTransport, EventFlow } from "/eventflow/index.js";
+import { ConsoleTransport, EventFlow } from "../../../dist/src/react-native.js";
+import { createMockServer } from "../server.mjs";
 
-const todoForm = document.querySelector("#todo-form");
-const todoInput = document.querySelector("#todo-input");
-const todoList = document.querySelector("#todo-list");
-const simulateWebhookButton = document.querySelector("#simulate-webhook");
+const server = createMockServer();
 
-const clientActiveEl = document.querySelector("#client-active");
-const clientEmittedEl = document.querySelector("#client-emitted");
-const serverEmittedEl = document.querySelector("#server-emitted");
+const elements = {
+  todoForm: document.querySelector("#todo-form"),
+  todoInput: document.querySelector("#todo-input"),
+  todoList: document.querySelector("#todo-list"),
+  simulateWebhookButton: document.querySelector("#simulate-webhook"),
+  simulateCheckoutButton: document.querySelector("#simulate-checkout"),
+  simulateFailureButton: document.querySelector("#simulate-failure"),
+  resetDemoButton: document.querySelector("#reset-demo"),
+  clientActiveEl: document.querySelector("#client-active"),
+  clientEmittedEl: document.querySelector("#client-emitted"),
+  serverEmittedEl: document.querySelector("#server-emitted"),
+  statusEl: document.querySelector("#status"),
+};
 
 const state = {
   todos: [],
-  clientEmitted: [],
-  serverEmitted: [],
+  clientEvents: [],
+  serverEvents: [],
 };
 
 const captureTransport = {
   log(event) {
-    state.clientEmitted.unshift(event);
-    if (state.clientEmitted.length > 50) {
-      state.clientEmitted.pop();
+    state.clientEvents.unshift({
+      ...event,
+      source: "client",
+      emitted_at: new Date().toISOString(),
+    });
+
+    if (state.clientEvents.length > 100) {
+      state.clientEvents.pop();
     }
+
     renderDebug();
   },
 };
 
 EventFlow.setTransport([new ConsoleTransport(), captureTransport]);
 
-void loadTodos();
-setInterval(renderDebug, 200);
-initServerEventStream();
+const saveDraftInstrumentation = EventFlow.instrument(
+  "client.todo.draft",
+  async (value) => {
+    await sleep(20);
+    return { chars: value.length };
+  },
+  {
+    stepName: "ui:autosave-draft",
+    contextFromArgs: (value) => ({ draftLength: value.length }),
+    contextFromResult: (result) => ({ autosavedChars: result.chars }),
+    startIfMissing: true,
+    eventName: "client.todo.input",
+  },
+);
 
-if (todoForm) {
-  todoForm.addEventListener("submit", (event) => {
+void loadTodos();
+setInterval(syncServerEvents, 250);
+setInterval(renderDebug, 250);
+
+if (elements.todoInput) {
+  elements.todoInput.addEventListener("input", () => {
+    const text = elements.todoInput?.value ?? "";
+    if (text.length > 2) {
+      void saveDraftInstrumentation(text).catch(() => {
+        // No-op; this demo path intentionally ignores draft save errors.
+      });
+    }
+  });
+}
+
+if (elements.todoForm) {
+  elements.todoForm.addEventListener("submit", (event) => {
     event.preventDefault();
     void createTodo();
   });
 }
 
-if (simulateWebhookButton) {
-  simulateWebhookButton.addEventListener("click", () => {
-    void simulateWebhook();
+if (elements.simulateWebhookButton) {
+  elements.simulateWebhookButton.addEventListener("click", () => {
+    void simulateWebhookRoundTrip();
+  });
+}
+
+if (elements.simulateCheckoutButton) {
+  elements.simulateCheckoutButton.addEventListener("click", () => {
+    void simulateCheckoutFlow();
+  });
+}
+
+if (elements.simulateFailureButton) {
+  elements.simulateFailureButton.addEventListener("click", () => {
+    void simulateFailureFlow();
+  });
+}
+
+if (elements.resetDemoButton) {
+  elements.resetDemoButton.addEventListener("click", () => {
+    server.reset();
+    state.clientEvents = [];
+    state.serverEvents = [];
+    setStatus("Demo reset");
+    void loadTodos();
   });
 }
 
@@ -48,24 +110,21 @@ async function loadTodos() {
   try {
     const data = await requestWithEvent({
       eventName: "todo.load",
+      method: "GET",
+      path: "/api/todos",
       context: { action: "load" },
-      request: (headers) => fetch("/api/todos", { headers }),
     });
 
     state.todos = data.todos ?? [];
     renderTodos();
+    setStatus(`Loaded ${state.todos.length} todos`);
   } catch (error) {
-    console.error(error);
-    alert(`Failed to load todos: ${toError(error).message}`);
+    setStatus(`Load failed: ${toError(error).message}`, true);
   }
 }
 
 async function createTodo() {
-  if (!todoInput) {
-    return;
-  }
-
-  const text = todoInput.value.trim();
+  const text = elements.todoInput?.value?.trim() ?? "";
   if (!text) {
     return;
   }
@@ -73,26 +132,27 @@ async function createTodo() {
   try {
     const data = await requestWithEvent({
       eventName: "todo.create",
-      context: { action: "create", textLength: text.length },
-      request: (headers) =>
-        fetch("/api/todos", {
-          method: "POST",
-          headers: {
-            ...headers,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ text }),
-        }),
+      method: "POST",
+      path: "/api/todos",
+      body: { text },
+      context: {
+        action: "create",
+        textLength: text.length,
+      },
     });
 
     if (data.todo) {
       state.todos.unshift(data.todo);
+      renderTodos();
     }
-    todoInput.value = "";
-    renderTodos();
+
+    if (elements.todoInput) {
+      elements.todoInput.value = "";
+    }
+
+    setStatus(`Created todo \"${text}\"`);
   } catch (error) {
-    console.error(error);
-    alert(`Failed to create todo: ${toError(error).message}`);
+    setStatus(`Create failed: ${toError(error).message}`, true);
   }
 }
 
@@ -100,22 +160,22 @@ async function toggleTodo(id) {
   try {
     const data = await requestWithEvent({
       eventName: "todo.toggle",
-      context: { action: "toggle", todoId: id },
-      request: (headers) =>
-        fetch(`/api/todos/${id}/toggle`, {
-          method: "PATCH",
-          headers,
-        }),
+      method: "PATCH",
+      path: `/api/todos/${id}/toggle`,
+      context: {
+        action: "toggle",
+        todoId: id,
+      },
     });
 
-    const updated = data.todo;
-    if (updated) {
-      state.todos = state.todos.map((item) => (item.id === updated.id ? updated : item));
+    if (data.todo) {
+      state.todos = state.todos.map((item) => (item.id === data.todo.id ? data.todo : item));
+      renderTodos();
     }
-    renderTodos();
+
+    setStatus(`Toggled todo #${id}`);
   } catch (error) {
-    console.error(error);
-    alert(`Failed to toggle todo: ${toError(error).message}`);
+    setStatus(`Toggle failed: ${toError(error).message}`, true);
   }
 }
 
@@ -123,106 +183,226 @@ async function deleteTodo(id) {
   try {
     await requestWithEvent({
       eventName: "todo.delete",
-      context: { action: "delete", todoId: id },
-      request: (headers) =>
-        fetch(`/api/todos/${id}`, {
-          method: "DELETE",
-          headers,
-        }),
+      method: "DELETE",
+      path: `/api/todos/${id}`,
+      context: {
+        action: "delete",
+        todoId: id,
+      },
     });
 
     state.todos = state.todos.filter((item) => item.id !== id);
     renderTodos();
+    setStatus(`Deleted todo #${id}`);
   } catch (error) {
-    console.error(error);
-    alert(`Failed to delete todo: ${toError(error).message}`);
+    setStatus(`Delete failed: ${toError(error).message}`, true);
   }
 }
 
-async function simulateWebhook() {
-  EventFlow.startEvent("todo.webhookRoundTrip");
-  EventFlow.addContext({ surface: "web", source: "simulate-button" });
+async function simulateCheckoutFlow() {
+  EventFlow.startEvent("checkout.orchestration");
+  EventFlow.addContext({
+    surface: "client",
+    cartId: `cart_${Math.random().toString(36).slice(2, 8)}`,
+    itemCount: state.todos.length,
+  });
 
   try {
-    EventFlow.step("prepare-metadata");
-    const metadata = EventFlow.getPropagationMetadata();
+    EventFlow.step("checkout:start");
 
-    const response = await fetch("/api/webhook/todo-sync", {
+    const checkoutResponse = await requestAgainstExistingEvent({
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        action: "todo_synced",
-        metadata,
-      }),
+      path: "/api/checkout",
+      body: { amount: 4200, currency: "usd" },
+      context: { phase: "create-payment-intent" },
     });
 
-    const data = await response.json();
-    if (data.continuationToken) {
-      EventFlow.continueFromToken(data.continuationToken);
+    EventFlow.step("checkout:open-payment-sheet");
+    await sleep(90);
+
+    const metadata = EventFlow.getPropagationMetadata();
+
+    const webhookResponse = await mockFetch("/api/webhook/todo-sync", {
+      method: "POST",
+      body: {
+        action: "payment_confirmed",
+        metadata,
+      },
+    });
+
+    if (webhookResponse.data.continuationToken) {
+      EventFlow.continueFromToken(webhookResponse.data.continuationToken);
+      EventFlow.step("checkout:continued-from-webhook");
     }
 
-    EventFlow.step("webhook-response-received");
-    EventFlow.addContext({ webhookStatus: response.status });
+    EventFlow.addContext({ paymentIntent: checkoutResponse.data.paymentIntent });
+    EventFlow.step("checkout:complete");
+    EventFlow.endEvent();
+    setStatus("Checkout flow simulated");
+  } catch (error) {
+    EventFlow.fail(error);
+    setStatus(`Checkout simulation failed: ${toError(error).message}`, true);
+  }
+}
 
-    if (!response.ok) {
-      throw new Error(data.error ?? `webhook-http-${response.status}`);
+async function simulateWebhookRoundTrip() {
+  EventFlow.startEvent("todo.webhookRoundTrip");
+  EventFlow.addContext({
+    surface: "client",
+    source: "simulate-webhook-button",
+  });
+
+  try {
+    EventFlow.step("webhook:prepare-metadata");
+    const metadata = EventFlow.getPropagationMetadata();
+
+    const response = await mockFetch("/api/webhook/todo-sync", {
+      method: "POST",
+      body: {
+        action: "todo_synced",
+        metadata,
+      },
+    });
+
+    if (response.data.continuationToken) {
+      EventFlow.continueFromToken(response.data.continuationToken);
+      EventFlow.step("webhook:continued-on-client");
     }
 
     EventFlow.endEvent();
+    setStatus("Webhook metadata continuation simulated");
   } catch (error) {
     EventFlow.fail(error);
-    alert(`Webhook simulation failed: ${toError(error).message}`);
+    setStatus(`Webhook simulation failed: ${toError(error).message}`, true);
   }
 }
 
-async function requestWithEvent({ eventName, context, request }) {
+async function simulateFailureFlow() {
+  try {
+    await requestWithEvent({
+      eventName: "todo.forceFailure",
+      method: "PATCH",
+      path: "/api/todos/999999/toggle",
+      context: {
+        action: "forced-failure",
+      },
+    });
+  } catch {
+    setStatus("Failure flow emitted expected failed events", true);
+  }
+}
+
+async function requestWithEvent({ eventName, method, path, body, context = {} }) {
   EventFlow.startEvent(eventName);
   EventFlow.addContext({
-    surface: "web",
+    surface: "client",
     ...context,
   });
 
   try {
-    EventFlow.step("request-start");
-
-    const headers = {
-      ...EventFlow.getPropagationHeaders(),
-      "x-request-id": `web_${Math.random().toString(36).slice(2, 10)}`,
-    };
-
-    const response = await request(headers);
-    const data = await response.json().catch(() => ({}));
-
-    const continuationToken =
-      response.headers.get("x-eventflow-token") ?? data.continuationToken;
-
-    if (continuationToken) {
-      EventFlow.continueFromToken(continuationToken);
-    }
-
-    EventFlow.step("response-received");
-    EventFlow.addContext({ httpStatus: response.status });
-
-    if (!response.ok) {
-      throw new Error(data.error ?? `http-${response.status}`);
-    }
+    const response = await requestAgainstExistingEvent({
+      method,
+      path,
+      body,
+      context,
+    });
 
     EventFlow.endEvent();
-    return data;
+    return response.data;
   } catch (error) {
     EventFlow.fail(error);
     throw error;
   }
 }
 
+async function requestAgainstExistingEvent({ method, path, body, context = {} }) {
+  await EventFlow.run(
+    "client:prepare-request",
+    async () => {
+      EventFlow.addContext({
+        requestPath: path,
+        requestMethod: method,
+        ...context,
+      });
+      await sleep(25);
+    },
+    { startIfMissing: true, eventName: "client.request" },
+  );
+
+  const response = await mockFetch(path, { method, body });
+
+  const continuationToken =
+    response.headers.get("x-eventflow-token") ?? response.data.continuationToken;
+
+  if (continuationToken) {
+    EventFlow.continueFromToken(continuationToken);
+    EventFlow.step("client:continued-from-token");
+  }
+
+  EventFlow.step("client:response-received");
+  EventFlow.addContext({
+    httpStatus: response.status,
+  });
+
+  if (!response.ok) {
+    throw new Error(response.data.error ?? `http-${response.status}`);
+  }
+
+  return response;
+}
+
+async function mockFetch(url, init = {}) {
+  const method = String(init.method ?? "GET").toUpperCase();
+  const headers = {
+    ...EventFlow.getPropagationHeaders(),
+    "x-request-id": `web_${Math.random().toString(36).slice(2, 10)}`,
+    ...(init.headers ?? {}),
+  };
+
+  const result = await server.request({
+    method,
+    url,
+    headers,
+    body: init.body ?? {},
+  });
+
+  state.serverEvents = server.getEmittedEvents();
+  renderDebug();
+
+  return {
+    status: result.status,
+    ok: result.status >= 200 && result.status < 300,
+    headers: {
+      get(name) {
+        if (!name) {
+          return null;
+        }
+
+        const key = String(name).toLowerCase();
+        const found = Object.entries(result.headers ?? {}).find(
+          ([headerName]) => headerName.toLowerCase() === key,
+        );
+
+        return found ? String(found[1]) : null;
+      },
+    },
+    data: result.body ?? {},
+    async json() {
+      return result.body ?? {};
+    },
+  };
+}
+
+function syncServerEvents() {
+  state.serverEvents = server.getEmittedEvents();
+}
+
 function renderTodos() {
-  if (!todoList) {
+  if (!elements.todoList) {
     return;
   }
 
-  todoList.innerHTML = "";
+  elements.todoList.innerHTML = "";
 
   for (const todo of state.todos) {
     const li = document.createElement("li");
@@ -242,6 +422,7 @@ function renderTodos() {
     });
 
     const deleteButton = document.createElement("button");
+    deleteButton.className = "danger";
     deleteButton.textContent = "Delete";
     deleteButton.addEventListener("click", () => {
       void deleteTodo(todo.id);
@@ -249,47 +430,35 @@ function renderTodos() {
 
     actions.append(toggleButton, deleteButton);
     li.append(text, actions);
-    todoList.appendChild(li);
+    elements.todoList.appendChild(li);
   }
 }
 
 function renderDebug() {
   const active = EventFlow.getCurrentEvent();
 
-  if (clientActiveEl) {
-    clientActiveEl.textContent = active
+  if (elements.clientActiveEl) {
+    elements.clientActiveEl.textContent = active
       ? JSON.stringify(active, null, 2)
       : "(none)";
   }
 
-  if (clientEmittedEl) {
-    clientEmittedEl.textContent = JSON.stringify(state.clientEmitted, null, 2);
+  if (elements.clientEmittedEl) {
+    elements.clientEmittedEl.textContent = JSON.stringify(state.clientEvents, null, 2);
   }
 
-  if (serverEmittedEl) {
-    serverEmittedEl.textContent = JSON.stringify(state.serverEmitted, null, 2);
+  if (elements.serverEmittedEl) {
+    elements.serverEmittedEl.textContent = JSON.stringify(state.serverEvents, null, 2);
   }
 }
 
-function initServerEventStream() {
-  const stream = new EventSource("/api/debug/stream");
+function setStatus(message, isError = false) {
+  if (!elements.statusEl) {
+    return;
+  }
 
-  stream.onmessage = (message) => {
-    try {
-      const parsed = JSON.parse(message.data);
-      if (parsed.type === "connected") {
-        return;
-      }
-
-      state.serverEmitted.unshift(parsed);
-      if (state.serverEmitted.length > 50) {
-        state.serverEmitted.pop();
-      }
-      renderDebug();
-    } catch {
-      // Ignore malformed stream items.
-    }
-  };
+  elements.statusEl.textContent = message;
+  elements.statusEl.dataset.error = isError ? "true" : "false";
 }
 
 function toError(error) {
@@ -298,4 +467,8 @@ function toError(error) {
   }
 
   return new Error(String(error));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

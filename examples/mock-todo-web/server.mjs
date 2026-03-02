@@ -1,349 +1,31 @@
-import fs from "node:fs";
-import path from "node:path";
-import http from "node:http";
-import { fileURLToPath } from "node:url";
-import {
-  ConsoleTransport,
-  EventFlow,
-  createEventFlowMiddleware,
-} from "../../dist/src/index.js";
+import { ConsoleTransport, EventFlowClient } from "../../dist/src/react-native.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, "../..");
-const publicDir = path.join(__dirname, "public");
-const distDir = path.join(projectRoot, "dist", "src");
-
-if (!fs.existsSync(path.join(distDir, "index.js"))) {
-  console.error("Build artifacts not found. Run `npm run build` first.");
-  process.exit(1);
-}
-
-const todos = [];
-let nextTodoId = 1;
-
-const emittedServerEvents = [];
-const sseClients = new Set();
-
-const debugTransport = {
-  log(event) {
-    const item = {
-      ...event,
-      source: "server",
-      emitted_at: new Date().toISOString(),
-    };
-
-    emittedServerEvents.unshift(item);
-    if (emittedServerEvents.length > 200) {
-      emittedServerEvents.pop();
-    }
-
-    const payload = JSON.stringify(item);
-    for (const client of sseClients) {
-      client.write(`data: ${payload}\n\n`);
-    }
-  },
+const JSON_HEADERS = {
+  "content-type": "application/json; charset=utf-8",
 };
 
-EventFlow.setTransport([new ConsoleTransport(), debugTransport]);
+function createContextManager() {
+  let currentEvent = null;
+  let traceId = null;
 
-const eventFlowMiddleware = createEventFlowMiddleware(EventFlow, {
-  eventName: (req) => `api:${req.method ?? "GET"} ${pathname(req.url)}`,
-  mapContext: (req) => ({
-    app: "mock-todo-web",
-    requestId: firstHeader(req.headers, "x-request-id") ?? randomRequestId(),
-  }),
-  includeRequestContext: true,
-  failOn5xx: true,
-  autoEnd: true,
-});
-
-const server = http.createServer((req, res) => {
-  const routePath = pathname(req.url);
-
-  if (routePath.startsWith("/api/")) {
-    setCorsHeaders(res);
-    if (req.method === "OPTIONS") {
-      res.statusCode = 204;
-      res.end();
-      return;
-    }
-  }
-
-  if (routePath === "/api/debug/stream") {
-    handleSse(req, res);
-    return;
-  }
-
-  if (routePath === "/api/debug/events") {
-    sendJson(res, 200, {
-      events: emittedServerEvents.slice(0, 100),
-    });
-    return;
-  }
-
-  if (routePath === "/api/webhook/todo-sync" && req.method === "POST") {
-    void handleWebhook(req, res);
-    return;
-  }
-
-  if (routePath.startsWith("/api/")) {
-    eventFlowMiddleware(req, res, () => {
-      void handleApi(req, res).catch((error) => {
-        const err = toError(error);
-        const statusCode = typeof err.statusCode === "number" ? err.statusCode : 500;
-        EventFlow.addContext({
-          unhandledError: err.message,
-          responseStatusCode: statusCode,
-        });
-        sendJson(res, statusCode, { error: err.message });
-      });
-    });
-    return;
-  }
-
-  serveStatic(routePath, res);
-});
-
-server.on("error", (error) => {
-  console.error("Mock web server failed to start:", error);
-});
-
-server.listen(4310, "127.0.0.1", () => {
-  console.log("Mock todo app running at http://127.0.0.1:4310");
-});
-
-async function handleApi(req, res) {
-  const routePath = pathname(req.url);
-
-  if (routePath === "/api/todos" && req.method === "GET") {
-    await EventFlow.run("load-todos", async () => {
-      EventFlow.addContext({ totalTodos: todos.length });
-    });
-
-    return respondWithContinuation(res, 200, { todos });
-  }
-
-  if (routePath === "/api/todos" && req.method === "POST") {
-    const payload = await EventFlow.run(
-      "parse-create-body",
-      async () => readJson(req),
-      { failEventOnError: false },
-    );
-
-    await EventFlow.run(
-      "validate-create-body",
-      async () => {
-        if (typeof payload.text !== "string" || payload.text.trim().length === 0) {
-          const error = new Error("text-required");
-          error.statusCode = 400;
-          throw error;
-        }
-      },
-      { failEventOnError: false },
-    );
-
-    const todo = await EventFlow.run("create-todo", async () => {
-      const item = {
-        id: String(nextTodoId++),
-        text: payload.text.trim(),
-        done: false,
-        createdAt: new Date().toISOString(),
-      };
-      todos.unshift(item);
-      EventFlow.addContext({ createdTodoId: item.id });
-      return item;
-    });
-
-    return respondWithContinuation(res, 201, { todo });
-  }
-
-  if (routePath.startsWith("/api/todos/") && routePath.endsWith("/toggle") && req.method === "PATCH") {
-    const todoId = routePath.split("/")[3] ?? "";
-
-    const todo = await EventFlow.run(
-      "toggle-todo",
-      async () => {
-        const found = todos.find((item) => item.id === todoId);
-        if (!found) {
-          const error = new Error("todo-not-found");
-          error.statusCode = 404;
-          throw error;
-        }
-
-        found.done = !found.done;
-        EventFlow.addContext({ toggledTodoId: found.id, done: found.done });
-        return found;
-      },
-      { failEventOnError: false },
-    );
-
-    return respondWithContinuation(res, 200, { todo });
-  }
-
-  if (routePath.startsWith("/api/todos/") && req.method === "DELETE") {
-    const todoId = routePath.split("/")[3] ?? "";
-
-    await EventFlow.run(
-      "delete-todo",
-      async () => {
-        const index = todos.findIndex((item) => item.id === todoId);
-        if (index < 0) {
-          const error = new Error("todo-not-found");
-          error.statusCode = 404;
-          throw error;
-        }
-
-        const [removed] = todos.splice(index, 1);
-        EventFlow.addContext({ deletedTodoId: removed.id });
-      },
-      { failEventOnError: false },
-    );
-
-    return respondWithContinuation(res, 200, { ok: true });
-  }
-
-  res.statusCode = 404;
-  sendJson(res, 404, { error: "not_found" });
+  return {
+    getCurrentEvent() {
+      return currentEvent;
+    },
+    setCurrentEvent(event) {
+      currentEvent = event;
+    },
+    getTraceId() {
+      return traceId;
+    },
+    setTraceId(nextTraceId) {
+      traceId = nextTraceId;
+    },
+  };
 }
 
-async function handleWebhook(req, res) {
-  try {
-    const body = await readJson(req);
-    const attached = EventFlow.fromMetadata(body.metadata ?? {});
-
-    if (!attached) {
-      EventFlow.startEvent("webhook:todo-sync");
-    }
-
-    await EventFlow.run("process-webhook", async () => {
-      EventFlow.addContext({
-        webhookAction: body.action ?? "unknown",
-        webhookSource: "mock-provider",
-      });
-    });
-
-    const continuationToken = EventFlow.getContinuationToken();
-    EventFlow.endEvent();
-
-    sendJson(res, 200, {
-      ok: true,
-      continuationToken,
-    });
-  } catch (error) {
-    EventFlow.fail(error);
-    sendJson(res, 400, {
-      error: toError(error).message,
-    });
-  }
-}
-
-function handleSse(req, res) {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-    "Access-Control-Allow-Origin": "*",
-  });
-
-  res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
-
-  sseClients.add(res);
-  req.on("close", () => {
-    sseClients.delete(res);
-  });
-}
-
-function serveStatic(routePath, res) {
-  if (routePath.startsWith("/eventflow/")) {
-    const relative = routePath.replace(/^\/eventflow\//, "");
-    const filePath = path.join(distDir, relative);
-    return sendFile(filePath, res);
-  }
-
-  const filePath =
-    routePath === "/"
-      ? path.join(publicDir, "index.html")
-      : path.join(publicDir, routePath.replace(/^\//, ""));
-
-  sendFile(filePath, res);
-}
-
-function sendFile(filePath, res) {
-  const normalized = path.normalize(filePath);
-  if (!fs.existsSync(normalized) || fs.statSync(normalized).isDirectory()) {
-    res.statusCode = 404;
-    res.end("Not found");
-    return;
-  }
-
-  const ext = path.extname(normalized);
-  const mime =
-    ext === ".html"
-      ? "text/html; charset=utf-8"
-      : ext === ".js"
-        ? "text/javascript; charset=utf-8"
-        : ext === ".css"
-          ? "text/css; charset=utf-8"
-          : "application/octet-stream";
-
-  res.setHeader("content-type", mime);
-  fs.createReadStream(normalized).pipe(res);
-}
-
-function respondWithContinuation(res, statusCode, payload) {
-  const continuationToken = EventFlow.getContinuationToken();
-  if (continuationToken) {
-    res.setHeader("x-eventflow-token", continuationToken);
-  }
-
-  sendJson(res, statusCode, {
-    ...payload,
-    continuationToken,
-  });
-}
-
-function sendJson(res, statusCode, body) {
-  res.statusCode = statusCode;
-  res.setHeader("content-type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(body));
-}
-
-function setCorsHeaders(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    [
-      "content-type",
-      "x-request-id",
-      "x-eventflow-trace-id",
-      "x-eventflow-event-id",
-      "x-eventflow-context",
-      "x-eventflow-event",
-    ].join(","),
-  );
-}
-
-function firstHeader(headers, name) {
-  const value = headers[name.toLowerCase()];
-  if (typeof value === "string") {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-
-  return undefined;
-}
-
-function pathname(rawUrl) {
-  return new URL(rawUrl ?? "/", "http://127.0.0.1").pathname;
-}
-
-function randomRequestId() {
-  return `req_${Math.random().toString(36).slice(2, 10)}`;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function toError(error) {
@@ -354,21 +36,332 @@ function toError(error) {
   return new Error(String(error));
 }
 
-function readJson(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-
-    req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-    req.on("end", () => {
-      try {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch {
-        const error = new Error("invalid-json");
-        error.statusCode = 400;
-        reject(error);
-      }
-    });
-    req.on("error", reject);
-  });
+function parsePath(rawUrl) {
+  return new URL(rawUrl ?? "/", "https://mock.local").pathname;
 }
+
+function firstHeader(headers, name) {
+  if (!headers) {
+    return undefined;
+  }
+
+  const direct = headers[name];
+  if (typeof direct === "string") {
+    return direct;
+  }
+
+  const lower = headers[name.toLowerCase()];
+  if (typeof lower === "string") {
+    return lower;
+  }
+
+  return undefined;
+}
+
+function randomRequestId() {
+  return `mock_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function createMockServer(options = {}) {
+  const {
+    seedTodos = [
+      { id: "1", text: "Try creating a todo", done: false, createdAt: new Date().toISOString() },
+      { id: "2", text: "Toggle a todo to emit steps", done: true, createdAt: new Date().toISOString() },
+    ],
+    baseLatencyMs = 80,
+  } = options;
+
+  const todos = seedTodos.map((item) => ({ ...item }));
+  let nextTodoId = Math.max(0, ...todos.map((item) => Number.parseInt(item.id, 10) || 0)) + 1;
+
+  const emittedEvents = [];
+  const serverFlow = new EventFlowClient(createContextManager());
+
+  const captureTransport = {
+    log(event) {
+      emittedEvents.unshift({
+        ...event,
+        source: "server",
+        emitted_at: new Date().toISOString(),
+      });
+
+      if (emittedEvents.length > 200) {
+        emittedEvents.pop();
+      }
+    },
+  };
+
+  serverFlow.setTransport([new ConsoleTransport(), captureTransport]);
+
+  const createTodo = serverFlow.instrument(
+    "server.todo.create",
+    async (body) => {
+      await sleep(baseLatencyMs + 30);
+
+      const text = String(body?.text ?? "").trim();
+      if (!text) {
+        throw new Error("text-required");
+      }
+
+      const todo = {
+        id: String(nextTodoId++),
+        text,
+        done: false,
+        createdAt: new Date().toISOString(),
+      };
+
+      todos.unshift(todo);
+      return todo;
+    },
+    {
+      stepName: "db:insert-todo",
+      startIfMissing: false,
+      contextFromArgs: (body) => ({ requestedTextLength: String(body?.text ?? "").length }),
+      contextFromResult: (todo) => ({ createdTodoId: todo.id }),
+    },
+  );
+
+  const processWebhook = serverFlow.instrument(
+    "server.webhook.process",
+    async (body) => {
+      await sleep(baseLatencyMs + 50);
+      return {
+        ok: true,
+        action: body?.action ?? "unknown",
+      };
+    },
+    {
+      stepName: "webhook:process",
+      startIfMissing: false,
+      contextFromArgs: (body) => ({ webhookAction: body?.action ?? "unknown" }),
+    },
+  );
+
+  async function routeRequest(method, path, body) {
+    if (method === "GET" && path === "/api/debug/events") {
+      return {
+        status: 200,
+        body: {
+          events: emittedEvents.slice(0, 100),
+        },
+      };
+    }
+
+    if (method === "GET" && path === "/api/todos") {
+      const items = await serverFlow.run(
+        "db:list-todos",
+        async () => {
+          await sleep(baseLatencyMs);
+          return todos.map((item) => ({ ...item }));
+        },
+        { startIfMissing: false },
+      );
+
+      serverFlow.addContext({ totalTodos: items.length });
+      return {
+        status: 200,
+        body: { todos: items },
+      };
+    }
+
+    if (method === "POST" && path === "/api/todos") {
+      const todo = await createTodo(body);
+      return {
+        status: 201,
+        body: { todo },
+      };
+    }
+
+    if (method === "PATCH" && /^\/api\/todos\/[^/]+\/toggle$/.test(path)) {
+      const id = path.split("/")[3];
+
+      const todo = await serverFlow.run(
+        "db:toggle-todo",
+        async () => {
+          await sleep(baseLatencyMs + 10);
+
+          const found = todos.find((item) => item.id === id);
+          if (!found) {
+            throw new Error("todo-not-found");
+          }
+
+          found.done = !found.done;
+          return { ...found };
+        },
+        { startIfMissing: false },
+      );
+
+      serverFlow.addContext({ toggledTodoId: todo.id, done: todo.done });
+      return {
+        status: 200,
+        body: { todo },
+      };
+    }
+
+    if (method === "DELETE" && /^\/api\/todos\/[^/]+$/.test(path)) {
+      const id = path.split("/")[3];
+
+      await serverFlow.run(
+        "db:delete-todo",
+        async () => {
+          await sleep(baseLatencyMs + 20);
+
+          const index = todos.findIndex((item) => item.id === id);
+          if (index < 0) {
+            throw new Error("todo-not-found");
+          }
+
+          const [removed] = todos.splice(index, 1);
+          serverFlow.addContext({ deletedTodoId: removed.id });
+        },
+        { startIfMissing: false },
+      );
+
+      return {
+        status: 200,
+        body: { ok: true },
+      };
+    }
+
+    if (method === "POST" && path === "/api/checkout") {
+      const paymentIntent = await serverFlow.run(
+        "checkout:create-payment-intent",
+        async () => {
+          await sleep(baseLatencyMs + 35);
+          return `pi_${Math.random().toString(36).slice(2, 10)}`;
+        },
+        { startIfMissing: false },
+      );
+
+      serverFlow.addContext({ paymentIntent });
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          paymentIntent,
+        },
+      };
+    }
+
+    if (method === "POST" && path === "/api/webhook/todo-sync") {
+      if (!serverFlow.fromMetadata(body?.metadata ?? {})) {
+        serverFlow.startEvent("webhook.todo-sync");
+      }
+
+      serverFlow.addContext({
+        surface: "server",
+        requestKind: "webhook",
+      });
+
+      const result = await processWebhook(body);
+      const continuationToken = serverFlow.getContinuationToken();
+      serverFlow.endEvent();
+
+      return {
+        status: 200,
+        headers: continuationToken
+          ? { "x-eventflow-token": continuationToken }
+          : undefined,
+        body: {
+          ...result,
+          continuationToken,
+        },
+      };
+    }
+
+    return {
+      status: 404,
+      body: { error: "not_found" },
+    };
+  }
+
+  async function request(input = {}) {
+    const method = String(input.method ?? "GET").toUpperCase();
+    const path = parsePath(input.url ?? input.path ?? "/");
+    const headers = input.headers ?? {};
+    const body = input.body ?? {};
+
+    if (method === "OPTIONS" && path.startsWith("/api/")) {
+      return {
+        status: 204,
+        headers: {
+          ...JSON_HEADERS,
+          "access-control-allow-origin": "*",
+        },
+        body: {},
+      };
+    }
+
+    if (!path.startsWith("/api/")) {
+      return {
+        status: 404,
+        headers: { ...JSON_HEADERS },
+        body: { error: "not_found" },
+      };
+    }
+
+    if (path !== "/api/webhook/todo-sync") {
+      serverFlow.fromHeaders(headers);
+      if (!serverFlow.getCurrentEvent()) {
+        serverFlow.startEvent(`api:${method} ${path}`);
+      }
+    }
+
+    serverFlow.addContext({
+      surface: "server",
+      requestPath: path,
+      requestMethod: method,
+      requestId: firstHeader(headers, "x-request-id") ?? randomRequestId(),
+      transport: "mock-server",
+    });
+
+    serverFlow.step("request:received");
+
+    try {
+      const routed = await routeRequest(method, path, body);
+      const continuationToken = serverFlow.getContinuationToken();
+
+      if (path !== "/api/webhook/todo-sync") {
+        serverFlow.addContext({ responseStatusCode: routed.status });
+        serverFlow.endEvent(routed.status >= 400 ? "failed" : "success");
+      }
+
+      return {
+        status: routed.status,
+        headers: {
+          ...JSON_HEADERS,
+          ...(routed.headers ?? {}),
+          ...(continuationToken ? { "x-eventflow-token": continuationToken } : {}),
+        },
+        body: {
+          ...(routed.body ?? {}),
+          ...(continuationToken ? { continuationToken } : {}),
+        },
+      };
+    } catch (error) {
+      const err = toError(error);
+      serverFlow.fail(err);
+
+      const status = err.message === "todo-not-found" ? 404 : 400;
+      return {
+        status,
+        headers: { ...JSON_HEADERS },
+        body: { error: err.message },
+      };
+    }
+  }
+
+  return {
+    request,
+    getEmittedEvents() {
+      return emittedEvents.slice(0, 100);
+    },
+    reset() {
+      todos.splice(0, todos.length, ...seedTodos.map((item) => ({ ...item })));
+      emittedEvents.splice(0, emittedEvents.length);
+      nextTodoId = Math.max(0, ...todos.map((item) => Number.parseInt(item.id, 10) || 0)) + 1;
+    },
+  };
+}
+
+export default createMockServer;

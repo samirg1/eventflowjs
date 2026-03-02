@@ -24,16 +24,9 @@ npm install eventflowjs
 
 ## Examples Quickstart
 
-Start here to run real mock apps locally. Each link includes complete setup and run steps.
-
-- [Mock Todo Web App](examples/mock-todo-web/README.md): browser todo UI + Node API + live client/server event progression panel.
-- [Mock Todo React Native App](examples/mock-todo-rn/README.md): mobile todo app + local backend + in-app event debugger.
-
-Open an instant, no-setup mobile demo in Expo Snack:
+Run a native / web version to try it out here:
 
 - [Live Snack: Checkout Orchestration](https://snack.expo.dev/3gM42hha3w3Iect_0SB5I): frontend -> API -> frontend continuation token flow plus metadata-based webhook continuation with live event panels.
-
-These two mock apps are recommended for manual smoke testing of propagation flows (`headers`, `continuationToken`, `metadata`).
 
 ## React Native
 
@@ -222,21 +215,10 @@ EventFlow.setTransport(new HttpTransport());
 
 ### Primary mock apps
 
-- [Mock Todo Web App](examples/mock-todo-web/README.md): runnable browser + Node todo app with live event progression and emitted-event panels.
+- [Mock Todo Web App](examples/mock-todo-web/README.md): runnable browser-only todo demo with live event progression and emitted-event panels.
 - [Mock Todo React Native App](examples/mock-todo-rn/README.md): runnable RN todo app with local event debugger panel.
 
 Both primary mock apps are suitable for manual smoke testing of propagation flows (`headers`, `continuationToken`, `metadata`).
-
-### Secondary reference scripts
-
-- `examples/basic.ts`: minimal lifecycle logging (`start -> context -> step -> end`).
-- `examples/browser.ts`: browser-side propagation headers and request handoff.
-- `examples/server.ts`: Node server middleware integration (`app.use(eventFlowMiddleware)` pattern).
-- `examples/fullstack.ts`: client -> server -> client continuation token flow.
-- `examples/webhook.ts`: generic provider metadata continuation in webhook handlers.
-- `examples/production-api.ts`: production-style API flow with custom middleware context, validation, instrumentation, and redacted transport.
-- `examples/checkout-orchestration.ts`: end-to-end checkout orchestration with frontend/server/webhook continuation.
-- `examples/worker-retries.ts`: queue worker retry lifecycle with continuation tokens across attempts.
 
 ## API Reference
 

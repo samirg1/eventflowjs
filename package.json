@@ -47,16 +47,7 @@
     "test": "vitest run",
     "check": "npm run build && npm run test",
     "pack:check": "npm pack --dry-run --cache /tmp/eventflow-npm-cache",
-    "prepublishOnly": "npm run check && npm run pack:check",
-    "example": "npm run build && node dist/examples/basic.js",
-    "example:server": "npm run build && node dist/examples/server.js",
-    "example:browser": "npm run build && node dist/examples/browser.js",
-    "example:fullstack": "npm run build && node dist/examples/fullstack.js",
-    "example:webhook": "npm run build && node dist/examples/webhook.js",
-    "example:production-api": "npm run build && node dist/examples/production-api.js",
-    "example:checkout-orchestration": "npm run build && node dist/examples/checkout-orchestration.js",
-    "example:worker-retries": "npm run build && node dist/examples/worker-retries.js",
-    "example:mock-todo-web": "npm run build && node examples/mock-todo-web/server.mjs"
+    "prepublishOnly": "npm run check && npm run pack:check"
   },
   "keywords": [
     "logging",

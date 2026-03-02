@@ -3,17 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EventFlow Mock Todo Web App</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <title>EventFlow Mock Todo Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="layout">
       <section class="panel app-panel">
-        <h1>Todo App (Web)</h1>
+        <h1>EventFlow Mock Todo Demo</h1>
         <p class="subtext">
-          This mock app uses EventFlow for lifecycle logging across browser actions,
-          API calls, and webhook simulation.
+          Browser-only demo with an in-memory mock server. No backend process required.
         </p>
+
+        <p id="status" class="status" data-error="false">Ready</p>
 
         <form id="todo-form" class="todo-form">
           <input id="todo-input" type="text" placeholder="Add a todo..." required />
@@ -22,13 +23,21 @@
 
         <ul id="todo-list" class="todo-list"></ul>
 
-        <button id="simulate-webhook" class="secondary">
-          Simulate Provider Webhook
-        </button>
+        <div class="button-grid">
+          <button id="simulate-checkout" class="secondary">Simulate Checkout Flow</button>
+          <button id="simulate-webhook" class="secondary">Simulate Webhook Flow</button>
+          <button id="simulate-failure" class="danger">Simulate Failure Flow</button>
+          <button id="reset-demo" class="muted">Reset Demo State</button>
+        </div>
       </section>
 
       <section class="panel debug-panel">
         <h2>Event Debugger</h2>
+        <p class="subtext">
+          Uses `startEvent`, `addContext`, `step`, `run`, `instrument`, propagation headers,
+          continuation tokens, metadata continuation, and custom transports.
+        </p>
+
         <div class="debug-grid">
           <div>
             <h3>Client Active Event</h3>
@@ -41,13 +50,13 @@
           </div>
 
           <div>
-            <h3>Server Emitted Events (Live)</h3>
+            <h3>Server Emitted Events (Mock)</h3>
             <pre id="server-emitted">[]</pre>
           </div>
         </div>
       </section>
     </main>
 
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>

@@ -10,19 +10,13 @@
 
 ## Prerequisites
 
-1. Start the backend from the required web demo first.
+1. A compatible local backend exposing `/api/todos`, `/api/debug/events`, and `/api/webhook/todo-sync`.
 2. Expo-compatible mobile environment (iOS simulator, Android emulator, or device).
 
-## Required Backend + Browser Demo
+## Backend Setup
 
-Run the backend from: [Mock Todo Web App](../mock-todo-web/README.md)
-
-From the repository root:
-
-```bash
-npm run build
-node examples/mock-todo-web/server.mjs
-```
+The web demo is now browser-only (in-memory mock API) and does not launch a network backend.
+For RN, run your own local backend that follows the same endpoint contract.
 
 ## Run Locally
 

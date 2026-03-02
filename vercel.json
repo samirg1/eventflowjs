@@ -1,0 +1,11 @@
+{
+    "version": 2,
+    "buildCommand": "npm run build && cp -r dist/src examples/mock-todo-web/public",
+    "outputDirectory": "examples/mock-todo-web/public",
+    "routes": [
+        {
+            "src": "/(.*)",
+            "dest": "examples/mock-todo-web/server.mjs"
+        }
+    ]
+}
