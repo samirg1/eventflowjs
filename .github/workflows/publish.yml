@@ -1,0 +1,75 @@
+name: Publish to npm
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Ensure package version changed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BEFORE_SHA="${{ github.event.before }}"
+          CURRENT_VERSION="$(node -p "require('./package.json').version")"
+
+          echo "Current version: ${CURRENT_VERSION}"
+
+          if [[ "${BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            echo "No previous commit found for this ref; skipping version gate."
+            exit 0
+          fi
+
+          if ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            echo "Previous commit ${BEFORE_SHA} not available; skipping version gate."
+            exit 0
+          fi
+
+          PREVIOUS_PACKAGE_JSON="$(mktemp)"
+          if ! git show "${BEFORE_SHA}:package.json" > "${PREVIOUS_PACKAGE_JSON}" 2>/dev/null; then
+            echo "package.json missing in previous commit; skipping version gate."
+            rm -f "${PREVIOUS_PACKAGE_JSON}"
+            exit 0
+          fi
+
+          PREVIOUS_VERSION="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).version" "${PREVIOUS_PACKAGE_JSON}")"
+          rm -f "${PREVIOUS_PACKAGE_JSON}"
+
+          echo "Previous version: ${PREVIOUS_VERSION}"
+
+          if [[ "${CURRENT_VERSION}" == "${PREVIOUS_VERSION}" ]]; then
+            echo "Version unchanged in package.json (${CURRENT_VERSION})."
+            echo "Publishing is rejected: bump package.json version before pushing to main."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish package
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
