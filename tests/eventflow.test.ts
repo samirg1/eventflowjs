@@ -10,6 +10,7 @@ import {
   deserializeEvent,
   type EventLog,
   type Transport,
+  type TransportEmissionOptions,
 } from "../src/index.js";
 
 class MemoryTransport implements Transport {
@@ -17,6 +18,24 @@ class MemoryTransport implements Transport {
 
   log(event: EventLog): void {
     this.events.push(event);
+  }
+}
+
+class EmissionAwareMemoryTransport implements Transport {
+  events: EventLog[] = [];
+  debugMessages: string[] = [];
+  readonly emissionOptions?: TransportEmissionOptions;
+
+  constructor(emissionOptions?: TransportEmissionOptions) {
+    this.emissionOptions = emissionOptions;
+  }
+
+  log(event: EventLog): void {
+    this.events.push(event);
+  }
+
+  logDebug(message: string): void {
+    this.debugMessages.push(message);
   }
 }
 
@@ -157,12 +176,14 @@ describe("EventFlow", () => {
   it("throws when getUserContext returns a non-object value", () => {
     type Account = { uid: string };
 
-    EventFlow.configure({
-      getUserContext: (_account: Account) => "invalid" as unknown as Record<string, unknown>,
-    });
 
     EventFlow.startEvent("invalid-user-context");
-    expect(() => EventFlow.addUserContext({ uid: "u_4" })).toThrow(
+    expect(() => {
+          EventFlow.configure({
+            getUserContext: (_account: Account) => "invalid" as unknown as Record<string, unknown>,
+          });
+          EventFlow.addUserContext({ uid: "u_4" })
+      }).toThrow(
       "EventFlow getUserContext must return a non-null object.",
     );
   });
@@ -233,6 +254,98 @@ describe("EventFlow", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it("console transport can emit only failed events", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      EventFlow.setTransport(new ConsoleTransport({ emissionMode: "errors-only" }));
+
+      EventFlow.startEvent("success-hidden");
+      EventFlow.endEvent();
+      expect(spy).not.toHaveBeenCalled();
+
+      EventFlow.startEvent("failure-shown");
+      EventFlow.fail(new Error("boom"));
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0][0])).toContain('"status": "failed"');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("samples non-failed events by configured percentage", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const randomSpy = vi
+      .spyOn(Math, "random")
+      .mockReturnValueOnce(0.8)
+      .mockReturnValueOnce(0.2);
+
+    try {
+      EventFlow.setTransport(new ConsoleTransport({ nonErrorSampleRate: 50 }));
+
+      EventFlow.startEvent("sampled-out");
+      EventFlow.endEvent();
+
+      EventFlow.startEvent("sampled-in");
+      EventFlow.endEvent();
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      expect(String(logSpy.mock.calls[0][0])).toContain('"name": "sampled-in"');
+      expect(randomSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      randomSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
+
+  it("debug mode prints a simple success marker when success payload is suppressed", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      EventFlow.setTransport(new ConsoleTransport({
+        emissionMode: "errors-only",
+        debug: true,
+      }));
+
+      EventFlow.startEvent("hidden-success");
+      EventFlow.endEvent();
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0][0]).toBe("Successful Event");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("throws for invalid transport nonErrorSampleRate values", () => {
+    expect(
+      () => EventFlow.setTransport(new ConsoleTransport({ nonErrorSampleRate: -1 })),
+    ).toThrow(
+      "EventFlow transport emission option `nonErrorSampleRate` must be a number between 0 and 100.",
+    );
+    expect(
+      () => EventFlow.setTransport(new ConsoleTransport({ nonErrorSampleRate: 101 })),
+    ).toThrow(
+      "EventFlow transport emission option `nonErrorSampleRate` must be a number between 0 and 100.",
+    );
+  });
+
+  it("applies emission options to custom transports without custom emit logic", () => {
+    const transport = new EmissionAwareMemoryTransport({
+      emissionMode: "errors-only",
+      debug: true,
+    });
+    EventFlow.setTransport(transport);
+
+    EventFlow.startEvent("suppressed-success");
+    EventFlow.endEvent();
+
+    EventFlow.startEvent("visible-failure");
+    EventFlow.fail(new Error("boom"));
+
+    expect(transport.events).toHaveLength(1);
+    expect(transport.events[0].status).toBe("failed");
+    expect(transport.debugMessages).toEqual(["Successful Event"]);
   });
 
   it("isolates active events across async flows", async () => {

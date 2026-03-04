@@ -30,6 +30,7 @@ export {
 export type {
   CallerInfo,
   ContextManager,
+  EventEmissionMode,
   EventFlowClientConfig,
   EventFlowClientConfigureOptions,
   EventFlowClientConfigureWithUserContext,
@@ -49,6 +50,7 @@ export type {
   SerializedPropagationEvent,
   Step,
   Transport,
+  TransportEmissionOptions,
   UserContextMapper,
 } from "./types.js";
 export type {

@@ -11,6 +11,7 @@ import { generateId } from "./utils/generateId.js";
 import { getCallerInfo } from "./utils/getCallerInfo.js";
 import type {
   ContextManager,
+  EventEmissionMode,
   EventFlowClientConfig,
   EventFlowClientConfigureOptions,
   EventFlowClientConfigureWithUserContext,
@@ -28,6 +29,7 @@ import type {
   RunOptions,
   SerializedPropagationEvent,
   Transport,
+  TransportEmissionOptions,
   UserContextMapper,
 } from "./types.js";
 
@@ -45,6 +47,7 @@ export class EventFlowClient<TAccount = never> {
     transports: Transport[] = [new ConsoleTransport()],
   ) {
     this.transports = transports;
+    this.validateTransportEmissionOptions();
     this.applyConfigToTransports();
   }
 
@@ -215,6 +218,7 @@ export class EventFlowClient<TAccount = never> {
    */
   setTransport(transport: Transport | Transport[]): void {
     this.transports = Array.isArray(transport) ? transport : [transport];
+    this.validateTransportEmissionOptions();
     this.applyConfigToTransports();
   }
 
@@ -512,7 +516,26 @@ export class EventFlowClient<TAccount = never> {
 
   private emit(event: EventLog): void {
     for (const transport of this.transports) {
+      const options = resolveTransportEmissionOptions(transport.emissionOptions);
+      if (!shouldEmitEvent(event, options)) {
+        if (options.debug && event.status === "success") {
+          const message = "Successful Event";
+          if (transport.logDebug) {
+            transport.logDebug(message, event);
+          } else {
+            console.log(message);
+          }
+        }
+        continue;
+      }
+
       transport.log(event);
+    }
+  }
+
+  private validateTransportEmissionOptions(): void {
+    for (const transport of this.transports) {
+      resolveTransportEmissionOptions(transport.emissionOptions);
     }
   }
 
@@ -585,3 +608,82 @@ function parseRunArguments<T>(
     options: fnOrOptions as RunOptions | undefined,
   };
 }
+
+function shouldEmitEvent(
+  event: EventLog,
+  options: ResolvedTransportEmissionOptions,
+): boolean {
+  if (event.status === "failed") {
+    return true;
+  }
+
+  if (options.emissionMode === "errors-only") {
+    return false;
+  }
+
+  return passesSampleRate(options.nonErrorSampleRate);
+}
+
+function passesSampleRate(percent: number): boolean {
+  if (percent <= 0) {
+    return false;
+  }
+
+  if (percent >= 100) {
+    return true;
+  }
+
+  return Math.random() * 100 < percent;
+}
+
+function resolveTransportEmissionOptions(
+  options?: TransportEmissionOptions,
+): ResolvedTransportEmissionOptions {
+  const emissionMode = validateEmissionMode(options?.emissionMode ?? "all");
+  const nonErrorSampleRate = validateNonErrorSampleRate(
+    options?.nonErrorSampleRate ?? 100,
+  );
+  const debug = validateDebugOption(options?.debug ?? false);
+
+  return {
+    emissionMode,
+    nonErrorSampleRate,
+    debug,
+  };
+}
+
+function validateEmissionMode(value: EventEmissionMode): EventEmissionMode {
+  if (value === "all" || value === "errors-only") {
+    return value;
+  }
+
+  throw new TypeError(
+    "EventFlow transport emission option `emissionMode` must be either \"all\" or \"errors-only\".",
+  );
+}
+
+function validateNonErrorSampleRate(value: number): number {
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new RangeError(
+      "EventFlow transport emission option `nonErrorSampleRate` must be a number between 0 and 100.",
+    );
+  }
+
+  return value;
+}
+
+function validateDebugOption(value: boolean): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(
+      "EventFlow transport emission option `debug` must be a boolean.",
+    );
+  }
+
+  return value;
+}
+
+type ResolvedTransportEmissionOptions = {
+  emissionMode: EventEmissionMode;
+  nonErrorSampleRate: number;
+  debug: boolean;
+};

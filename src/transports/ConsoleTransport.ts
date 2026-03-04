@@ -1,32 +1,46 @@
-import type { EventFlowClientConfig, EventLog, Transport } from "../types.js";
+import type {
+  EventFlowClientConfig,
+  EventLog,
+  Transport,
+  TransportEmissionOptions,
+} from "../types.js";
 
 function rgb(r: number, g: number, b: number) {
-    return `\x1b[38;2;${r};${g};${b}m`;
+  return `\x1b[38;2;${r};${g};${b}m`;
 }
 
 function formatPrefix() {
-    const reset = "\x1b[0m";
+  const reset = "\x1b[0m";
 
-    const purple = rgb(18, 44, 85);
-    const teal = rgb(17, 181, 160);
+  const purple = rgb(18, 44, 85);
+  const teal = rgb(17, 181, 160);
 
-    return `${purple}[Event${teal}Flow]${reset}`;
+  return `${purple}[Event${teal}Flow]${reset}`;
 }
 
 export class ConsoleTransport implements Transport {
-    private branding = true;
+  private branding = true;
+  readonly emissionOptions?: TransportEmissionOptions;
 
-    configure(config: EventFlowClientConfig): void {
-        this.branding = config.branding;
+  constructor(emissionOptions?: TransportEmissionOptions) {
+    this.emissionOptions = emissionOptions;
+  }
+
+  configure(config: EventFlowClientConfig): void {
+    this.branding = config.branding;
+  }
+
+  log(event: EventLog): void {
+    const payload = JSON.stringify(event, null, 2);
+    if (!this.branding) {
+      console.log(payload);
+      return;
     }
 
-    log(event: EventLog): void {
-        const payload = JSON.stringify(event, null, 2);
-        if (!this.branding) {
-            console.log(payload);
-            return;
-        }
+    console.log(`${formatPrefix()} ${payload}`);
+  }
 
-        console.log(`${formatPrefix()} ${payload}`);
-    }
+  logDebug(message: string): void {
+    console.log(message);
+  }
 }

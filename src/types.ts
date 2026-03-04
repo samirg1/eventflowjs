@@ -37,6 +37,14 @@ export interface EventFlowClientConfig {
   branding: boolean;
 }
 
+export type EventEmissionMode = "all" | "errors-only";
+
+export interface TransportEmissionOptions {
+  emissionMode?: EventEmissionMode;
+  nonErrorSampleRate?: number;
+  debug?: boolean;
+}
+
 export type UserContextMapper<TAccount> = (account: TAccount) => EventContext;
 
 export type EventFlowClientConfigureOptions = Partial<EventFlowClientConfig> & {
@@ -88,6 +96,8 @@ export interface SerializedPropagationEvent {
 export interface Transport {
   log(event: EventLog): void;
   configure?(config: EventFlowClientConfig): void;
+  emissionOptions?: TransportEmissionOptions;
+  logDebug?(message: string, event: EventLog): void;
 }
 
 export interface ContextState {

@@ -229,9 +229,16 @@ EventFlow.endEvent();
 ## Transport Extension
 
 ```ts
-import type { EventLog, Transport } from "eventflowjs";
+import {
+  ConsoleTransport,
+  EventFlow,
+  type EventLog,
+  type Transport,
+} from "eventflowjs";
 
 class HttpTransport implements Transport {
+  readonly emissionOptions = { nonErrorSampleRate: 25 };
+
   log(event: EventLog): void {
     void fetch("/logs", {
       method: "POST",
@@ -241,8 +248,20 @@ class HttpTransport implements Transport {
   }
 }
 
-EventFlow.setTransport(new HttpTransport());
+EventFlow.setTransport([
+  new ConsoleTransport({
+    emissionMode: "errors-only",
+    nonErrorSampleRate: 100,
+    debug: true,
+  }),
+  new HttpTransport(),
+]);
 ```
+
+`emissionMode` defaults to `"all"` and can be set to `"errors-only"`.
+`nonErrorSampleRate` defaults to `100` and controls what percentage of non-failed events are emitted.
+`debug` defaults to `false`. When `true`, suppressed successful events trigger a simple `Successful Event` debug message.
+Emission filtering and sampling are applied by `EventFlow` before `transport.log(...)` is called, so custom transports do not need to implement emit logic.
 
 ## Examples
 
@@ -252,6 +271,10 @@ EventFlow.setTransport(new HttpTransport());
 - [Mock Todo React Native App](examples/mock-todo-rn/README.md): runnable RN todo app with local event debugger panel.
 
 Both primary mock apps are suitable for manual smoke testing of propagation flows (`headers`, `continuationToken`, `metadata`).
+
+### Script examples
+
+- [Configure + Transport Options](examples/configure-and-transports.ts): simple setup showing `EventFlow.configure(...)` together with per-transport emission options in `setTransport([...])`.
 
 ## API Reference
 
@@ -325,6 +348,14 @@ Both primary mock apps are suitable for manual smoke testing of propagation flow
 | `branding` | `boolean` | `true` | Same as `EventFlowClientConfigureOptions`. |
 | `getUserContext` | `(account: TAccount) => EventContext` | required | Maps your user/account object into the payload used by `addUserContext(account)` at `context.user`. |
 
+### `TransportEmissionOptions`
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `emissionMode` | `"all" \| "errors-only"` | `"all"` | Controls whether all events are emitted or only failed events. |
+| `nonErrorSampleRate` | `number` | `100` | Percentage (`0`-`100`) of non-failed events to emit. |
+| `debug` | `boolean` | `false` | When enabled, suppressed successful events trigger a `Successful Event` debug message. |
+
 ### `InstrumentOptions`
 
 `InstrumentOptions` extends `RunOptions` and adds:
@@ -368,4 +399,4 @@ Both primary mock apps are suitable for manual smoke testing of propagation flow
 
 ### Exported Types
 
-`EventStatus`, `EventContext`, `Step`, `CallerInfo`, `EventError`, `EventLog`, `EventFlowClientConfig`, `EventFlowClientConfigureOptions`, `EventFlowClientConfigureWithUserContext`, `UserContextMapper`, `SerializedPropagationEvent`, `Transport`, `ContextManager`, `HeadersLike`, `RunCallback`, `RunOptions`, `InstrumentCallback`, `InstrumentedFunction`, `InstrumentOptions`, `PropagationMetadata`, `PropagationMetadataInput`, `PropagationMetadataOptions`, `EventFlowMiddleware`, `EventFlowMiddlewareOptions`, `NodeLikeRequest`, `NodeLikeResponse`, `NextFunction`.
+`EventStatus`, `EventContext`, `Step`, `CallerInfo`, `EventError`, `EventLog`, `EventEmissionMode`, `TransportEmissionOptions`, `EventFlowClientConfig`, `EventFlowClientConfigureOptions`, `EventFlowClientConfigureWithUserContext`, `UserContextMapper`, `SerializedPropagationEvent`, `Transport`, `ContextManager`, `HeadersLike`, `RunCallback`, `RunOptions`, `InstrumentCallback`, `InstrumentedFunction`, `InstrumentOptions`, `PropagationMetadata`, `PropagationMetadataInput`, `PropagationMetadataOptions`, `EventFlowMiddleware`, `EventFlowMiddlewareOptions`, `NodeLikeRequest`, `NodeLikeResponse`, `NextFunction`.
