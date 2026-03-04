@@ -228,11 +228,12 @@ export class EventFlowClient<TAccount = never> {
    * Current supported options:
    * - `showFullErrorStack` (default `true`)
    * - `branding` (default `true`, used by `ConsoleTransport`)
+   * - `transports` (optional replacement transport or transports)
    *
    * @param options Partial configuration values to merge with current config.
    */
   configure(options: EventFlowClientConfigureOptions): void;
-  configure<TNextAccount>(
+  configure<TNextAccount = TAccount>(
     options: EventFlowClientConfigureWithUserContext<TNextAccount>,
   ): asserts this is EventFlowClient<TNextAccount>;
   configure(
@@ -256,6 +257,11 @@ export class EventFlowClient<TAccount = never> {
       ...this.config,
       ...nextConfig,
     };
+    if (options.transports !== undefined) {
+      this.setTransport(options.transports);
+      return;
+    }
+
     this.applyConfigToTransports();
   }
 

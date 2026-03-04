@@ -255,6 +255,37 @@ describe("EventFlow", () => {
     }
   });
 
+  it("replaces transports when provided via configure", () => {
+    const other = new MemoryTransport();
+
+    EventFlow.configure({ transports: other });
+    EventFlow.startEvent("configure-replace-transport");
+    EventFlow.endEvent();
+
+    expect(memory.events).toHaveLength(0);
+    expect(other.events).toHaveLength(1);
+    expect(other.events[0].name).toBe("configure-replace-transport");
+  });
+
+  it("applies config and transport replacement in a single configure call", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      EventFlow.configure({
+        branding: false,
+        transports: new ConsoleTransport(),
+      });
+      EventFlow.startEvent("configure-branding-and-transport");
+      EventFlow.endEvent();
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      const output = String(spy.mock.calls[0][0]);
+      expect(output).not.toContain("[Event");
+      expect(output.trimStart().startsWith("{")).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("console transport can emit only failed events", () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     try {

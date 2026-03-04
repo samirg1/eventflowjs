@@ -16,29 +16,28 @@ class MemoryTransport extends Transport {
 }
 
 type Account = { id: string; email: string };
-const AppEventFlow: EventFlowClient<never> = EventFlow;
+const AppEventFlow: EventFlowClient = EventFlow;
 const memory = new MemoryTransport({ nonErrorSampleRate: 100 });
 
+// Configure client behavior and transport replacement in one call.
 // Different transports can use different emission options:
 // - Console: only failed events (plus debug marker for suppressed successes)
 // - Memory: all non-failed events (100% sample rate)
-AppEventFlow.setTransport([
-  new ConsoleTransport({
-    emissionMode: "errors-only",
-    debug: true,
-  }),
-  memory,
-]);
-
-// Client-level behavior is configured separately from transport emission.
 AppEventFlow.configure({
   showFullErrorStack: false,
   branding: true,
+  transports: [
+    new ConsoleTransport({
+      emissionMode: "errors-only",
+      debug: true,
+    }),
+    memory,
+  ],
 });
 
 // Auto types future getUserContext calls to ensure consistent user context shape across the app.
-AppEventFlow.configure({
-  getUserContext: (account: Account) => ({
+AppEventFlow.configure<Account>({
+  getUserContext: (account) => ({
     id: account.id,
     email: account.email,
   }),

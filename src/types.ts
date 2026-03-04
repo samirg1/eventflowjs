@@ -175,6 +175,10 @@ export type UserContextMapper<TAccount> = (account: TAccount) => EventContext;
 export interface EventFlowClientConfigureOptions
   extends Partial<EventFlowClientConfig> {
   /**
+   * Replaces the client transport(s) when provided.
+   */
+  transports?: Transport | Transport[];
+  /**
    * Disallowed in this overload. Use
    * `EventFlowClientConfigureWithUserContext<TAccount>` to configure it.
    */
@@ -196,6 +200,10 @@ export interface EventFlowClientConfigureOptions
  */
 export interface EventFlowClientConfigureWithUserContext<TAccount>
   extends Partial<EventFlowClientConfig> {
+  /**
+   * Replaces the client transport(s) when provided.
+   */
+  transports?: Transport | Transport[];
   /**
    * Mapper used by `addUserContext(account)` to populate `context.user`.
    */

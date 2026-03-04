@@ -59,14 +59,16 @@ class HttpTransport extends Transport {
     }
 }
 
-EventFlow.setTransport([
+EventFlow.configure({
+    transports: [
     new ConsoleTransport({
         emissionMode: "errors-only",
         nonErrorSampleRate: 100,
         debug: true,
     }),
     new HttpTransport({ nonErrorSampleRate: 25 }),
-]);
+    ],
+});
 ```
 
 `emissionMode` defaults to `"all"` and can be set to `"errors-only"`.
@@ -221,7 +223,7 @@ const AppEventFlow: EventFlowClient<User> = EventFlow;
 AppEventFlow.configure({
   showFullErrorStack: false,
   branding: false,
-  getUserContext: (user: User) => ({
+  getUserContext: (user) => ({
     email: user.email,
     id: user.uid,
   }),
@@ -237,6 +239,7 @@ EventFlow.endEvent();
 
 `showFullErrorStack` defaults to `true`. When set to `false`, emitted failed events include only the first two lines of `error.stack`.
 `branding` defaults to `true`. When set to `false`, `ConsoleTransport` logs raw JSON without the `[EventFlow]` prefix.
+`transports` optionally replaces active transport(s) in the same configure call (equivalent to calling `setTransport(...)`).
 `getUserContext` configures `addUserContext(account)` to map your app-level user/account object into `context.user`.
 When `context.user` already exists, `addUserContext` overwrites it and logs a warning.
 
@@ -362,6 +365,7 @@ If you're having issues in React-Native you can import from `eventflowjs/react-n
 | -------------------- | --------- | ------- | ------------------------------------------------------------------------------ |
 | `showFullErrorStack` | `boolean` | `true`  | When `false`, failed events include only the first two lines of `error.stack`. |
 | `branding`           | `boolean` | `true`  | When `false`, `ConsoleTransport` logs plain JSON without the branding prefix.  |
+| `transports`         | `Transport \| Transport[]` | n/a | Replaces active transport(s), same as calling `setTransport(...)`. |
 
 ### `EventFlowClientConfigureWithUserContext<TAccount>`
 
@@ -369,6 +373,7 @@ If you're having issues in React-Native you can import from `eventflowjs/react-n
 | -------------------- | ------------------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
 | `showFullErrorStack` | `boolean`                             | `true`   | Same as `EventFlowClientConfigureOptions`.                                                          |
 | `branding`           | `boolean`                             | `true`   | Same as `EventFlowClientConfigureOptions`.                                                          |
+| `transports`         | `Transport \| Transport[]`            | n/a      | Same as `EventFlowClientConfigureOptions`; also works alongside `getUserContext`.                  |
 | `getUserContext`     | `(account: TAccount) => EventContext` | required | Maps your user/account object into the payload used by `addUserContext(account)` at `context.user`. |
 
 ### `TransportEmissionOptions`
