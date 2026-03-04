@@ -18,7 +18,7 @@ Instead of scattering many log statements, you create one event, enrich it as wo
 - Structured JSON output for easy ingestion and searching
 - Works in Node.js, browsers, and fullstack flows
 - Async-safe event isolation on Node via `AsyncLocalStorage`
-- Dependency-light and easy to embed
+- 0 dependencies
 
 ## Installation
 
@@ -32,17 +32,6 @@ Run a native / web version to try it out here:
 
 - [Live Snack: Checkout Orchestration](https://snack.expo.dev/3gM42hha3w3Iect_0SB5I): frontend -> API -> frontend continuation token flow plus metadata-based webhook continuation with live event panels.
 
-## React Native
-
-EventFlow supports React Native with a dedicated non-Node entrypoint.
-
-- Default import works in RN bundlers that honor the `react-native` package field:
-  - `import { EventFlow } from "eventflowjs";`
-- You can also import the RN entry explicitly:
-  - `import { EventFlow } from "eventflowjs/react-native";`
-
-The RN entry uses in-memory context (no `AsyncLocalStorage`) and is designed for mobile app event lifecycles.
-
 ## Quick Start
 
 ```ts
@@ -55,51 +44,203 @@ EventFlow.step("send-email");
 EventFlow.endEvent();
 ```
 
-Example output:
+## Custom Transports
+
+```ts
+import { ConsoleTransport, EventFlow, Transport } from "eventflowjs";
+
+class HttpTransport extends Transport {
+    log(event: Transport.EventLog): void {
+        void fetch("/logs", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(event),
+        });
+    }
+}
+
+EventFlow.setTransport([
+    new ConsoleTransport({
+        emissionMode: "errors-only",
+        nonErrorSampleRate: 100,
+        debug: true,
+    }),
+    new HttpTransport({ nonErrorSampleRate: 25 }),
+]);
+```
+
+`emissionMode` defaults to `"all"` and can be set to `"errors-only"`.
+`nonErrorSampleRate` defaults to `100` and controls what percentage of non-failed events are emitted.
+`debug` defaults to `false`. When `true`, suppressed successful events trigger a simple `Successful Event` debug message.
+
+## Example Fullstack Flow w/ Stripe
+
+### Send event to API
+
+```ts
+// client/src/components/CartCheckout.tsx
+EventFlow.startEvent("user_checkout");
+EventFlow.step("client.user_press_checkout");
+EventFlow.addContext({ cartID });
+EventFlow.addUserContext(user); // see configuration
+EventFlow.step("client.create_payment_intent");
+const { paymentIntentID, continuationToken } = await fetch(
+    "/api/createPaymentIntent",
+    {
+        method: "POST",
+        body,
+        headers: EventFlow.getPropagationHeaders(),
+    },
+);
+```
+
+### Receive event from Client, prepare metadata for Webhook, send event back to Client
+
+```ts
+// api/index.ts
+import { eventFlowMiddleware } from "eventflowjs";
+app.use(eventFlowMiddleware);
+
+// api/routes/createPaymentIntent.ts
+app.post("/createPaymentIntent", async (req, res) => {
+    const body = req.body;
+    EventFlow.step("api.received_create_pi")
+    EventFlow.addContext({ body });
+
+    const metadata = EventFlow.getPropagationMetadata();
+    const paymentIntent = await stripe.paymentIntents.create({
+        ...
+        metadata,
+        ...
+    });
+
+    EventFlow.step("api.sending_back_to_client");
+    EventFlow.addContext({ paymentIntentID: paymentIntent.id });
+    const continuationToken = EventFlow.getContinuationToken();
+    res.json({ paymentIntentID: paymentIntent.id, continuationToken });
+});
+```
+
+### Receive Event from API
+
+```ts
+// client/src/components/CartCheckout.tsx
+EventFlow.continueFromToken(continuationToken);
+EventFlow.addContext({ paymentIntentID });
+EventFlow.step("client.present_payment_sheet");
+const { error } = await presentPaymentSheet(paymentIntentID);
+if (error) return handleError(error);
+
+EventFlow.step("client.payment_success");
+EventFlow.endEvent();
+```
+
+### Receive event from Webhook
+
+```ts
+// api/routes/webhook
+if (event.type === "payment_intent.succeeded") {
+    const paymentIntent = event.data.object;
+
+    EventFlow.fromMetadata(paymentIntent.metadata);
+    EventFlow.step("webhook.payment_successful");
+    EventFlow.addContext({ receiptNumber });
+    EventFlow.endEvent();
+
+    res.json({ received: true });
+}
+```
+
+### Final Output:
+
+Note 3 emissions
+- client side
+- API route
+- API webhook
 
 ```json
 {
   "id": "evt_abc123",
-  "name": "createUser",
+  "name": "user_checkout",
   "status": "success",
   "timestamp": "2026-03-02T12:00:00.000Z",
-  "duration_ms": 124,
-  "context": { "userId": 123, "email": "test@example.com" },
+  "duration_ms": 4678, // for webhook, client/api will be shorter
+  "context": {
+    "cartID": "abc123",
+    "userID": "abc123",
+    "email": "test@example.com",
+    "body": {
+        "amount": 2500,
+        "currency": "AUD"
+    },
+    "paymentIntentID": "pi_12345",
+    "receiptNumber": "r_12345", // webhook only
+  },
   "steps": [
-    { "name": "create-db-record", "t": 30 },
-    { "name": "send-email", "t": 98 }
+    { "name": "client.user_press_checkout", "t": 30 },
+    { "name": "client.create_payment_intent", "t": 60 }
+    { "name": "api.received_create_pi", "t": 686 }
+    { "name": "api.sending_back_to_client", "t": 959 } // api/client only
+    { "name": "client.present_payment_sheet", "t": 1678 } // client only
+    { "name": "client.payment_success", "t": 3652 } // client only
+    { "name": "webhook.payment_successful", "t": 4678 } // webhook only
   ],
-  "caller": { "file": "userService.ts", "line": 42, "function": "createUser" },
+  "caller": { "file": "CartCheckout.tsx", "line": 42, "function": "onPressCheckout" },
   "traceId": "trc_xyz"
+}
+
+// if an error occurred
+{
+    ...
+    "status": "failed",
+    "context": {
+        ...
+        "customErrorContext": ...
+    },
+    "error": {
+        "message": "payment declined",
+        "stack": ...
+    }
+    ...
 }
 ```
 
-## Client -> Server Propagation
+## Client Configuration
 
-Create headers in the client:
+Use `configure` to control client-level behavior:
 
 ```ts
-EventFlow.startEvent("checkout");
-EventFlow.addContext({ cartId: "cart_123" });
+import { EventFlow, type EventFlowClient } from "eventflowjs";
 
-await fetch("/api/checkout", {
-  method: "POST",
-  headers: EventFlow.getPropagationHeaders(),
+// user / account object on your platform
+interface User { uid: string; email: string, ... };
+
+// for typing `getUserContext`
+const AppEventFlow: EventFlowClient<User> = EventFlow;
+
+AppEventFlow.configure({
+  showFullErrorStack: false,
+  branding: false,
+  getUserContext: (user: User) => ({
+    email: user.email,
+    id: user.uid,
+  }),
 });
+
+export { AppEventFlow as EventFlow };
+
+// then later:
+EventFlow.startEvent("checkout");
+EventFlow.addUserContext(user); // type safe
+EventFlow.endEvent();
 ```
 
-Continue on the server with middleware:
+`showFullErrorStack` defaults to `true`. When set to `false`, emitted failed events include only the first two lines of `error.stack`.
+`branding` defaults to `true`. When set to `false`, `ConsoleTransport` logs raw JSON without the `[EventFlow]` prefix.
+`getUserContext` configures `addUserContext(account)` to map your app-level user/account object into `context.user`.
+When `context.user` already exists, `addUserContext` overwrites it and logs a warning.
 
-```ts
-import { eventFlowMiddleware } from "eventflowjs";
-
-app.use(eventFlowMiddleware);
-
-// Inside your handler:
-EventFlow.step("validate-payment");
-EventFlow.addContext({ userId: 42 });
-// Middleware auto-ends on response finish.
-```
+TypeScript note: assertion-based narrowing requires an explicitly typed local reference (for example, `const AppEventFlow: EventFlowClient<User> = EventFlow;`). Configure and use that reference in the same scope for typed `addUserContext(...)` calls.
 
 ## Run Helper
 
@@ -107,7 +248,7 @@ EventFlow.addContext({ userId: 42 });
 
 ```ts
 await EventFlow.run("payment", async (event) => {
-  await payment();
+    await payment();
 });
 ```
 
@@ -126,46 +267,13 @@ Useful options:
 - `endIfStarted` (default `true`): auto-end only the event started by this run.
 - `statusOnAutoEnd` (default `"success"`): status used when auto-ending.
 
-## Client Configuration
-
-Use `configure` to control client-level behavior:
-
-```ts
-import { EventFlow, type EventFlowClient } from "eventflowjs";
-
-const AppEventFlow: EventFlowClient<never> = EventFlow;
-
-AppEventFlow.configure({ showFullErrorStack: false });
-AppEventFlow.configure({ branding: false });
-
-type Account = { uid: string; email: string };
-
-AppEventFlow.configure({
-  getUserContext: (account: Account) => ({
-    email: account.email,
-    id: account.uid,
-  }),
-});
-
-AppEventFlow.startEvent("checkout");
-AppEventFlow.addUserContext({ uid: "u_123", email: "user@example.com" });
-AppEventFlow.endEvent();
-```
-
-`showFullErrorStack` defaults to `true`. When set to `false`, emitted failed events include only the first two lines of `error.stack`.
-`branding` defaults to `true`. When set to `false`, `ConsoleTransport` logs raw JSON without the `[EventFlow]` prefix.
-`getUserContext` configures `addUserContext(account)` to map your app-level user/account object into `context.user`.
-When `context.user` already exists, `addUserContext` overwrites it and logs a warning.
-
-TypeScript note: assertion-based narrowing requires an explicitly typed local reference (for example, `const AppEventFlow: EventFlowClient<never> = EventFlow;`). Configure and use that reference in the same scope for typed `addUserContext(...)` calls.
-
 ## Instrument Helper
 
 `EventFlow.instrument` creates a reusable wrapped function with the same error behavior as `run`.
 
 ```ts
 const createUser = EventFlow.instrument("createUser", async (data) => {
-  return db.createUser(data);
+    return db.createUser(data);
 });
 
 const user = await createUser({ email: "test@example.com" });
@@ -184,223 +292,134 @@ Optional `instrument` options:
 - `contextFromArgs(...args)`: add context derived from input args
 - `contextFromResult(result, ...args)`: add context from the returned value
 
-Headers used:
+## React Native
 
-- `x-eventflow-trace-id`
-- `x-eventflow-event-id`
-- `x-eventflow-context`
-- `x-eventflow-event` (serialized payload)
+If you're having issues in React-Native you can import from `eventflowjs/react-native`, and raise an issue to get it sorted.
 
-## Server -> Frontend Continuation
-
-When the server needs to hand an event back to the frontend (for example: create payment intent, then continue UI flow), use continuation tokens:
-
-```ts
-// Server handler
-EventFlow.fromHeaders(req.headers);
-EventFlow.step("create-payment-intent");
-EventFlow.addContext({ paymentId: "pi_123" });
-const continuationToken = EventFlow.getContinuationToken();
-res.json({ paymentId: "pi_123", continuationToken });
-
-// Frontend
-EventFlow.continueFromToken(continuationToken);
-EventFlow.step("show-payment-sheet");
-EventFlow.step("process-payment");
-EventFlow.endEvent();
-```
-
-## Webhook Continuation (Generic Metadata)
-
-Pass EventFlow metadata to any external system that supports metadata fields:
-
-```ts
-const metadata = EventFlow.getPropagationMetadata();
-// provider.createAction({ ..., metadata })
-```
-
-Continue the event in your webhook handler:
-
-```ts
-const attached = EventFlow.fromMetadata(providerObject.metadata);
-if (!attached) {
-  EventFlow.startEvent("provider-webhook");
-}
-EventFlow.step("webhook-received");
-EventFlow.endEvent();
-```
-
-## Transport Extension
-
-```ts
-import {
-  ConsoleTransport,
-  EventFlow,
-  type EventLog,
-  type Transport,
-} from "eventflowjs";
-
-class HttpTransport implements Transport {
-  readonly emissionOptions = { nonErrorSampleRate: 25 };
-
-  log(event: EventLog): void {
-    void fetch("/logs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(event),
-    });
-  }
-}
-
-EventFlow.setTransport([
-  new ConsoleTransport({
-    emissionMode: "errors-only",
-    nonErrorSampleRate: 100,
-    debug: true,
-  }),
-  new HttpTransport(),
-]);
-```
-
-`emissionMode` defaults to `"all"` and can be set to `"errors-only"`.
-`nonErrorSampleRate` defaults to `100` and controls what percentage of non-failed events are emitted.
-`debug` defaults to `false`. When `true`, suppressed successful events trigger a simple `Successful Event` debug message.
-Emission filtering and sampling are applied by `EventFlow` before `transport.log(...)` is called, so custom transports do not need to implement emit logic.
-
-## Examples
-
-### Primary mock apps
-
-- [Mock Todo Web App](examples/mock-todo-web/README.md): runnable browser-only todo demo with live event progression and emitted-event panels.
-- [Mock Todo React Native App](examples/mock-todo-rn/README.md): runnable RN todo app with local event debugger panel.
-
-Both primary mock apps are suitable for manual smoke testing of propagation flows (`headers`, `continuationToken`, `metadata`).
-
-### Script examples
-
-- [Configure + Transport Options](examples/configure-and-transports.ts): simple setup showing `EventFlow.configure(...)` together with per-transport emission options in `setTransport([...])`.
+- `import { EventFlow } from "eventflowjs/react-native";`
 
 ## API Reference
 
 ### Primary Exports
 
-| Export | Description |
-| --- | --- |
-| `EventFlow` | Singleton `EventFlowClient` instance used for lifecycle logging. |
-| `EventFlowClient` | Class implementation behind the `EventFlow` singleton. |
+| Export                     | Description                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------------ |
+| `EventFlow`                | Singleton `EventFlowClient` instance used for lifecycle logging.                           |
+| `EventFlowClient`          | Class implementation behind the `EventFlow` singleton.                                     |
 | `eventflowjs/react-native` | React Native entrypoint that exports `EventFlow` wired to browser-style in-memory context. |
-| `eventFlowMiddleware` | Ready-to-use Node/Express middleware (`app.use(eventFlowMiddleware)`). |
-| `ConsoleTransport` | Built-in JSON console transport. |
+| `eventFlowMiddleware`      | Ready-to-use Node/Express middleware (`app.use(eventFlowMiddleware)`).                     |
+| `ConsoleTransport`         | Built-in JSON console transport.                                                           |
+| `Transport`                | Base class for custom transports. Extend it and implement `log(event)`.                    |
 
 ### Utility Functions
 
-| Function | Description | Arguments | Returns |
-| --- | --- | --- | --- |
-| `createEventFlowMiddleware(client, options?)` | Factory for custom middleware behavior. | `client: compatible EventFlow client`, `options?: EventFlowMiddlewareOptions` | `EventFlowMiddleware` |
-| `serializeEvent(event)` | Serializes an event payload for transport. | `event: EventLog` | `string` |
-| `deserializeEvent(data)` | Parses serialized propagation payload safely. | `data: string` | `SerializedPropagationEvent or null` |
-| `getPropagationHeaders(event)` | Builds header propagation map from event. | `event: EventLog` | `Record<string, string>` |
-| `extractEventFromHeaders(headers)` | Rehydrates propagation payload from headers. | `headers: HeadersLike` | `SerializedPropagationEvent or null` |
-| `getPropagationMetadata(event, options?)` | Builds metadata propagation map from event. | `event: EventLog`, `options?: PropagationMetadataOptions` | `PropagationMetadata` |
-| `extractEventFromMetadata(metadata)` | Rehydrates propagation payload from metadata map. | `metadata: PropagationMetadataInput` | `SerializedPropagationEvent or null` |
+| Function                                      | Description                                       | Arguments                                                                     | Returns                              |
+| --------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------ |
+| `createEventFlowMiddleware(client, options?)` | Factory for custom middleware behavior.           | `client: compatible EventFlow client`, `options?: EventFlowMiddlewareOptions` | `EventFlowMiddleware`                |
+| `serializeEvent(event)`                       | Serializes an event payload for transport.        | `event: EventLog`                                                             | `string`                             |
+| `deserializeEvent(data)`                      | Parses serialized propagation payload safely.     | `data: string`                                                                | `SerializedPropagationEvent or null` |
+| `getPropagationHeaders(event)`                | Builds header propagation map from event.         | `event: EventLog`                                                             | `Record<string, string>`             |
+| `extractEventFromHeaders(headers)`            | Rehydrates propagation payload from headers.      | `headers: HeadersLike`                                                        | `SerializedPropagationEvent or null` |
+| `getPropagationMetadata(event, options?)`     | Builds metadata propagation map from event.       | `event: EventLog`, `options?: PropagationMetadataOptions`                     | `PropagationMetadata`                |
+| `extractEventFromMetadata(metadata)`          | Rehydrates propagation payload from metadata map. | `metadata: PropagationMetadataInput`                                          | `SerializedPropagationEvent or null` |
 
 ### `EventFlow` Methods
 
-| Method | Description | Arguments | Returns |
-| --- | --- | --- | --- |
-| `startEvent(name)` | Starts a new event. Auto-cancels and emits any currently active event first. | `name: string` | `EventLog` |
-| `addContext(data)` | Shallow-merges context into the active event. No-op if no active event exists. | `data: EventContext` | `void` |
-| `addUserContext(account)` | Maps a configured user/account object and writes it to `context.user`. Throws if `getUserContext` is not configured. No-op if no event is active. | `account: TAccount` | `void` |
-| `step(name)` | Appends a step with elapsed time from event start. | `name: string` | `void` |
-| `endEvent(status?)` | Completes and emits the active event. | `status?: EventStatus` (default `"success"`) | `EventLog or null` |
-| `fail(error)` | Marks active event as failed, captures error, emits, clears current event. | `error: unknown` | `EventLog or null` |
-| `configure(options)` | Updates client-level behavior settings. | `options: EventFlowClientConfigureOptions` | `void` |
-| `getCurrentEvent()` | Returns current active event in context. | none | `EventLog or null` |
-| `setTransport(transport)` | Replaces transport(s) used for emitting events. | `transport: Transport or Transport[]` | `void` |
-| `getPropagationHeaders()` | Builds propagation headers from active event. | none | `Record<string, string>` |
-| `fromHeaders(headers)` | Rehydrates and attaches event from propagation headers. | `headers: HeadersLike` | `EventLog or null` |
-| `attach(event)` | Attaches a provided event payload as current active event. | `event: EventLog or SerializedPropagationEvent` | `EventLog` |
-| `getContinuationToken(event?)` | Serializes an event for server->client or worker continuation. | `event?: EventLog` (defaults to current event) | `string or null` |
-| `continueFromToken(token)` | Restores and attaches an event from a continuation token. | `token: string` | `EventLog or null` |
-| `getPropagationMetadata(event?, options?)` | Produces provider-friendly metadata fields for continuation. | `event?: EventLog`, `options?: PropagationMetadataOptions` | `PropagationMetadata` |
-| `fromMetadata(metadata)` | Restores and attaches an event from metadata fields. | `metadata: PropagationMetadataInput` | `EventLog or null` |
-| `run(stepName?, fn, options?)` | Runs callback with optional step, captures+rethrows errors, optional auto-start/auto-end behavior. | overloads: `run(fn, options?)`, `run(stepName, fn, options?)` | `Promise<T>` |
-| `instrument(eventName, fn, options?)` | Wraps a function in event lifecycle instrumentation for reuse. | `eventName: string`, `fn: (...args) => T`, `options?: InstrumentOptions` | `(...args) => Promise<T>` |
+| Method                                     | Description                                                                                                                                       | Arguments                                                                | Returns                   |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------- |
+| `startEvent(name)`                         | Starts a new event. Auto-cancels and emits any currently active event first.                                                                      | `name: string`                                                           | `EventLog`                |
+| `addContext(data)`                         | Shallow-merges context into the active event. No-op if no active event exists.                                                                    | `data: EventContext`                                                     | `void`                    |
+| `addUserContext(account)`                  | Maps a configured user/account object and writes it to `context.user`. Throws if `getUserContext` is not configured. No-op if no event is active. | `account: TAccount`                                                      | `void`                    |
+| `step(name)`                               | Appends a step with elapsed time from event start.                                                                                                | `name: string`                                                           | `void`                    |
+| `endEvent(status?)`                        | Completes and emits the active event.                                                                                                             | `status?: EventStatus` (default `"success"`)                             | `EventLog or null`        |
+| `fail(error)`                              | Marks active event as failed, captures error, emits, clears current event.                                                                        | `error: unknown`                                                         | `EventLog or null`        |
+| `configure(options)`                       | Updates client-level behavior settings.                                                                                                           | `options: EventFlowClientConfigureOptions`                               | `void`                    |
+| `getCurrentEvent()`                        | Returns current active event in context.                                                                                                          | none                                                                     | `EventLog or null`        |
+| `setTransport(transport)`                  | Replaces transport(s) used for emitting events.                                                                                                   | `transport: Transport or Transport[]`                                    | `void`                    |
+| `getPropagationHeaders()`                  | Builds propagation headers from active event.                                                                                                     | none                                                                     | `Record<string, string>`  |
+| `fromHeaders(headers)`                     | Rehydrates and attaches event from propagation headers.                                                                                           | `headers: HeadersLike`                                                   | `EventLog or null`        |
+| `attach(event)`                            | Attaches a provided event payload as current active event.                                                                                        | `event: EventLog or SerializedPropagationEvent`                          | `EventLog`                |
+| `getContinuationToken(event?)`             | Serializes an event for server->client or worker continuation.                                                                                    | `event?: EventLog` (defaults to current event)                           | `string or null`          |
+| `continueFromToken(token)`                 | Restores and attaches an event from a continuation token.                                                                                         | `token: string`                                                          | `EventLog or null`        |
+| `getPropagationMetadata(event?, options?)` | Produces provider-friendly metadata fields for continuation.                                                                                      | `event?: EventLog`, `options?: PropagationMetadataOptions`               | `PropagationMetadata`     |
+| `fromMetadata(metadata)`                   | Restores and attaches an event from metadata fields.                                                                                              | `metadata: PropagationMetadataInput`                                     | `EventLog or null`        |
+| `run(stepName?, fn, options?)`             | Runs callback with optional step, captures+rethrows errors, optional auto-start/auto-end behavior.                                                | overloads: `run(fn, options?)`, `run(stepName, fn, options?)`            | `Promise<T>`              |
+| `instrument(eventName, fn, options?)`      | Wraps a function in event lifecycle instrumentation for reuse.                                                                                    | `eventName: string`, `fn: (...args) => T`, `options?: InstrumentOptions` | `(...args) => Promise<T>` |
 
 ### `RunOptions`
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `failEventOnError` | `boolean` | `true` | Calls `EventFlow.fail(error)` before rethrow when callback throws. |
-| `startIfMissing` | `boolean` | `false` | Auto-starts an event if none is active. |
-| `eventName` | `string` | inferred | Event name used when auto-starting. |
-| `endIfStarted` | `boolean` | `true` | Auto-ends event only if this `run` started it. |
-| `statusOnAutoEnd` | `EventStatus` | `"success"` | Status used for auto-end path. |
+| Option             | Type          | Default     | Description                                                        |
+| ------------------ | ------------- | ----------- | ------------------------------------------------------------------ |
+| `failEventOnError` | `boolean`     | `true`      | Calls `EventFlow.fail(error)` before rethrow when callback throws. |
+| `startIfMissing`   | `boolean`     | `false`     | Auto-starts an event if none is active.                            |
+| `eventName`        | `string`      | inferred    | Event name used when auto-starting.                                |
+| `endIfStarted`     | `boolean`     | `true`      | Auto-ends event only if this `run` started it.                     |
+| `statusOnAutoEnd`  | `EventStatus` | `"success"` | Status used for auto-end path.                                     |
 
 ### `EventFlowClientConfigureOptions`
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `showFullErrorStack` | `boolean` | `true` | When `false`, failed events include only the first two lines of `error.stack`. |
-| `branding` | `boolean` | `true` | When `false`, `ConsoleTransport` logs plain JSON without the branding prefix. |
+| Option               | Type      | Default | Description                                                                    |
+| -------------------- | --------- | ------- | ------------------------------------------------------------------------------ |
+| `showFullErrorStack` | `boolean` | `true`  | When `false`, failed events include only the first two lines of `error.stack`. |
+| `branding`           | `boolean` | `true`  | When `false`, `ConsoleTransport` logs plain JSON without the branding prefix.  |
 
 ### `EventFlowClientConfigureWithUserContext<TAccount>`
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `showFullErrorStack` | `boolean` | `true` | Same as `EventFlowClientConfigureOptions`. |
-| `branding` | `boolean` | `true` | Same as `EventFlowClientConfigureOptions`. |
-| `getUserContext` | `(account: TAccount) => EventContext` | required | Maps your user/account object into the payload used by `addUserContext(account)` at `context.user`. |
+| Option               | Type                                  | Default  | Description                                                                                         |
+| -------------------- | ------------------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| `showFullErrorStack` | `boolean`                             | `true`   | Same as `EventFlowClientConfigureOptions`.                                                          |
+| `branding`           | `boolean`                             | `true`   | Same as `EventFlowClientConfigureOptions`.                                                          |
+| `getUserContext`     | `(account: TAccount) => EventContext` | required | Maps your user/account object into the payload used by `addUserContext(account)` at `context.user`. |
 
 ### `TransportEmissionOptions`
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `emissionMode` | `"all" \| "errors-only"` | `"all"` | Controls whether all events are emitted or only failed events. |
-| `nonErrorSampleRate` | `number` | `100` | Percentage (`0`-`100`) of non-failed events to emit. |
-| `debug` | `boolean` | `false` | When enabled, suppressed successful events trigger a `Successful Event` debug message. |
+| Option               | Type                     | Default | Description                                                                            |
+| -------------------- | ------------------------ | ------- | -------------------------------------------------------------------------------------- |
+| `emissionMode`       | `"all" \| "errors-only"` | `"all"` | Controls whether all events are emitted or only failed events.                         |
+| `nonErrorSampleRate` | `number`                 | `100`   | Percentage (`0`-`100`) of non-failed events to emit.                                   |
+| `debug`              | `boolean`                | `false` | When enabled, suppressed successful events trigger a `Successful Event` debug message. |
 
 ### `InstrumentOptions`
 
 `InstrumentOptions` extends `RunOptions` and adds:
 
-| Option | Type | Description |
-| --- | --- | --- |
-| `stepName` | `string` | Step name recorded for each instrumented call (defaults to `eventName`). |
-| `contextFromArgs` | `(...args) => EventContext` | Adds context from function input arguments. |
-| `contextFromResult` | `(result, ...args) => EventContext` | Adds context from function result. |
+| Option              | Type                                | Description                                                              |
+| ------------------- | ----------------------------------- | ------------------------------------------------------------------------ |
+| `stepName`          | `string`                            | Step name recorded for each instrumented call (defaults to `eventName`). |
+| `contextFromArgs`   | `(...args) => EventContext`         | Adds context from function input arguments.                              |
+| `contextFromResult` | `(result, ...args) => EventContext` | Adds context from function result.                                       |
 
 ### Middleware
 
-| Export | Description | Arguments |
-| --- | --- | --- |
-| `eventFlowMiddleware` | Default middleware instance using global `EventFlow`. | `(req, res, next)` |
+| Export                                        | Description                                                                                                      | Arguments                                                                     |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `eventFlowMiddleware`                         | Default middleware instance using global `EventFlow`.                                                            | `(req, res, next)`                                                            |
 | `createEventFlowMiddleware(client, options?)` | Creates middleware around any compatible client (`startEvent`, `addContext`, `endEvent`, `fail`, `fromHeaders`). | `client: compatible EventFlow client`, `options?: EventFlowMiddlewareOptions` |
 
 `EventFlowMiddlewareOptions`:
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `eventName` | `string or (req) => string` | `http:${method} ${url}` | Event name for non-propagated requests. |
-| `mapContext` | `(req) => EventContext` | `undefined` | Adds custom request-derived context. |
-| `includeRequestContext` | `boolean` | `true` | Adds `method` and `url` context automatically. |
-| `failOn5xx` | `boolean` | `true` | Marks event as failed when response status is `>= 500`. |
-| `autoEnd` | `boolean` | `true` | Ends events automatically on `finish`/`close`. |
+| Option                  | Type                        | Default                 | Description                                             |
+| ----------------------- | --------------------------- | ----------------------- | ------------------------------------------------------- |
+| `eventName`             | `string or (req) => string` | `http:${method} ${url}` | Event name for non-propagated requests.                 |
+| `mapContext`            | `(req) => EventContext`     | `undefined`             | Adds custom request-derived context.                    |
+| `includeRequestContext` | `boolean`                   | `true`                  | Adds `method` and `url` context automatically.          |
+| `failOn5xx`             | `boolean`                   | `true`                  | Marks event as failed when response status is `>= 500`. |
+| `autoEnd`               | `boolean`                   | `true`                  | Ends events automatically on `finish`/`close`.          |
 
 ### Propagation Constants
 
-| Constant | Value |
-| --- | --- |
-| `TRACE_ID_HEADER` | `"x-eventflow-trace-id"` |
-| `EVENT_ID_HEADER` | `"x-eventflow-event-id"` |
-| `CONTEXT_HEADER` | `"x-eventflow-context"` |
-| `EVENT_HEADER` | `"x-eventflow-event"` |
-| `EVENTFLOW_TRACE_ID_KEY` | `"eventflow_trace_id"` |
-| `EVENTFLOW_EVENT_ID_KEY` | `"eventflow_event_id"` |
+| Constant                   | Value                    |
+| -------------------------- | ------------------------ |
+| `TRACE_ID_HEADER`          | `"x-eventflow-trace-id"` |
+| `EVENT_ID_HEADER`          | `"x-eventflow-event-id"` |
+| `CONTEXT_HEADER`           | `"x-eventflow-context"`  |
+| `EVENT_HEADER`             | `"x-eventflow-event"`    |
+| `EVENTFLOW_TRACE_ID_KEY`   | `"eventflow_trace_id"`   |
+| `EVENTFLOW_EVENT_ID_KEY`   | `"eventflow_event_id"`   |
 | `EVENTFLOW_EVENT_NAME_KEY` | `"eventflow_event_name"` |
-| `EVENTFLOW_PARENT_ID_KEY` | `"eventflow_parent_id"` |
-| `EVENTFLOW_CONTEXT_KEY` | `"eventflow_context"` |
+| `EVENTFLOW_PARENT_ID_KEY`  | `"eventflow_parent_id"`  |
+| `EVENTFLOW_CONTEXT_KEY`    | `"eventflow_context"`    |
 
 ### Exported Types
 
-`EventStatus`, `EventContext`, `Step`, `CallerInfo`, `EventError`, `EventLog`, `EventEmissionMode`, `TransportEmissionOptions`, `EventFlowClientConfig`, `EventFlowClientConfigureOptions`, `EventFlowClientConfigureWithUserContext`, `UserContextMapper`, `SerializedPropagationEvent`, `Transport`, `ContextManager`, `HeadersLike`, `RunCallback`, `RunOptions`, `InstrumentCallback`, `InstrumentedFunction`, `InstrumentOptions`, `PropagationMetadata`, `PropagationMetadataInput`, `PropagationMetadataOptions`, `EventFlowMiddleware`, `EventFlowMiddlewareOptions`, `NodeLikeRequest`, `NodeLikeResponse`, `NextFunction`.
+`EventStatus`, `EventContext`, `Step`, `CallerInfo`, `EventError`, `EventLog`, `EventEmissionMode`, `TransportEmissionOptions`, `EventFlowClientConfig`, `EventFlowClientConfigureOptions`, `EventFlowClientConfigureWithUserContext`, `UserContextMapper`, `SerializedPropagationEvent`, `ContextManager`, `HeadersLike`, `RunCallback`, `RunOptions`, `InstrumentCallback`, `InstrumentedFunction`, `InstrumentOptions`, `PropagationMetadata`, `PropagationMetadataInput`, `PropagationMetadataOptions`, `EventFlowMiddleware`, `EventFlowMiddlewareOptions`, `NodeLikeRequest`, `NodeLikeResponse`, `NextFunction`.

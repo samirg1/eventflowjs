@@ -8,6 +8,7 @@ export const eventFlowMiddleware = createEventFlowMiddleware(EventFlow);
 export { EventFlowClient };
 export { createEventFlowMiddleware };
 export { ConsoleTransport } from "./transports/ConsoleTransport.js";
+export { Transport } from "./types.js";
 export { serializeEvent } from "./propagation/serializeEvent.js";
 export { deserializeEvent } from "./propagation/deserializeEvent.js";
 export {
@@ -49,7 +50,6 @@ export type {
   RunOptions,
   SerializedPropagationEvent,
   Step,
-  Transport,
   TransportEmissionOptions,
   UserContextMapper,
 } from "./types.js";

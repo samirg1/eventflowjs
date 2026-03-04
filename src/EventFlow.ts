@@ -683,7 +683,22 @@ function validateDebugOption(value: boolean): boolean {
 }
 
 type ResolvedTransportEmissionOptions = {
+  /**
+   * Normalized transport emission mode.
+   *
+   * @default "all"
+   */
   emissionMode: EventEmissionMode;
+  /**
+   * Normalized sample rate for non-failed events.
+   *
+   * @default 100
+   */
   nonErrorSampleRate: number;
+  /**
+   * Normalized debug toggle.
+   *
+   * @default false
+   */
   debug: boolean;
 };

@@ -3,34 +3,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ConsoleTransport,
   EventFlow,
+  Transport,
   type EventFlowClient,
   eventFlowMiddleware,
   extractEventFromHeaders,
   serializeEvent,
   deserializeEvent,
   type EventLog,
-  type Transport,
   type TransportEmissionOptions,
 } from "../src/index.js";
 
-class MemoryTransport implements Transport {
-  events: EventLog[] = [];
+class MemoryTransport extends Transport {
+  events: Transport.EventLog[] = [];
 
-  log(event: EventLog): void {
+  log(event: Transport.EventLog): void {
     this.events.push(event);
   }
 }
 
-class EmissionAwareMemoryTransport implements Transport {
-  events: EventLog[] = [];
+class EmissionAwareMemoryTransport extends Transport {
+  events: Transport.EventLog[] = [];
   debugMessages: string[] = [];
-  readonly emissionOptions?: TransportEmissionOptions;
 
   constructor(emissionOptions?: TransportEmissionOptions) {
-    this.emissionOptions = emissionOptions;
+    super(emissionOptions);
   }
 
-  log(event: EventLog): void {
+  log(event: Transport.EventLog): void {
     this.events.push(event);
   }
 

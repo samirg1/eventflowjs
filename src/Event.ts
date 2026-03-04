@@ -9,18 +9,69 @@ import type {
   Step,
 } from "./types.js";
 
+/**
+ * Constructor payload used to build an `EventRecord`.
+ */
 interface EventRecordParams {
+  /**
+   * Stable event ID.
+   */
   id: string;
+  /**
+   * Event name.
+   */
   name: string;
+  /**
+   * Trace correlation ID.
+   */
   traceId: string;
+  /**
+   * Parent event ID for propagated events.
+   */
   parentId?: string;
+  /**
+   * Event start time in ISO-8601 format.
+   *
+   * @default new Date(now).toISOString()
+   */
   timestamp?: string;
+  /**
+   * Initial event context.
+   *
+   * @default {}
+   */
   context?: EventContext;
+  /**
+   * Initial steps list.
+   *
+   * @default []
+   */
   steps?: Step[];
+  /**
+   * Captured caller details.
+   */
   caller?: CallerInfo;
+  /**
+   * Initial error payload.
+   */
   error?: EventError;
+  /**
+   * Initial status.
+   *
+   * @default "success"
+   */
   status?: EventStatus;
+  /**
+   * Initial duration in milliseconds.
+   *
+   * @default 0
+   */
   durationMs?: number;
+  /**
+   * Epoch milliseconds used as start baseline for elapsed step timings.
+   *
+   * @default parsed timestamp, or now if timestamp is invalid
+   */
   startedAtMs?: number;
 }
 

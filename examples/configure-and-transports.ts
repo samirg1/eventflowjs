@@ -1,23 +1,16 @@
 import {
   ConsoleTransport,
   EventFlow,
+  Transport,
   type EventFlowClient,
-  type EventLog,
-  type Transport,
-  type TransportEmissionOptions,
 } from "../src/index.js";
 
 // Simple custom transport that stores emitted events in memory.
 // It intentionally does not implement any filtering logic.
-class MemoryTransport implements Transport {
-  events: EventLog[] = [];
-  readonly emissionOptions?: TransportEmissionOptions;
+class MemoryTransport extends Transport {
+  events: Transport.EventLog[] = [];
 
-  constructor(emissionOptions?: TransportEmissionOptions) {
-    this.emissionOptions = emissionOptions;
-  }
-
-  log(event: EventLog): void {
+  log(event: Transport.EventLog): void {
     this.events.push(event);
   }
 }

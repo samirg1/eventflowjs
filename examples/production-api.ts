@@ -1,15 +1,14 @@
 import http from "node:http";
 import {
   EventFlow,
+  Transport,
   createEventFlowMiddleware,
   type EventContext,
-  type EventLog,
   type HeadersLike,
-  type Transport,
 } from "../src/index.js";
 
-class RedactingConsoleTransport implements Transport {
-  log(event: EventLog): void {
+class RedactingConsoleTransport extends Transport {
+  log(event: Transport.EventLog): void {
     const sanitized = {
       ...event,
       context: redactContext(event.context),

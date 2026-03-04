@@ -1,8 +1,5 @@
-import type {
-  EventFlowClientConfig,
-  EventLog,
+import {
   Transport,
-  TransportEmissionOptions,
 } from "../types.js";
 
 function rgb(r: number, g: number, b: number) {
@@ -18,29 +15,14 @@ function formatPrefix() {
   return `${purple}[Event${teal}Flow]${reset}`;
 }
 
-export class ConsoleTransport implements Transport {
-  private branding = true;
-  readonly emissionOptions?: TransportEmissionOptions;
-
-  constructor(emissionOptions?: TransportEmissionOptions) {
-    this.emissionOptions = emissionOptions;
-  }
-
-  configure(config: EventFlowClientConfig): void {
-    this.branding = config.branding;
-  }
-
-  log(event: EventLog): void {
+export class ConsoleTransport extends Transport {
+  log(event: Transport.EventLog): void {
     const payload = JSON.stringify(event, null, 2);
-    if (!this.branding) {
+    if (!this.config.branding) {
       console.log(payload);
       return;
     }
 
     console.log(`${formatPrefix()} ${payload}`);
-  }
-
-  logDebug(message: string): void {
-    console.log(message);
   }
 }

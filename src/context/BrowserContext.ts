@@ -1,7 +1,20 @@
 import type { ContextManager, EventLog } from "../types.js";
 
+/**
+ * In-memory browser context state for the active event lifecycle.
+ */
 interface BrowserState {
+  /**
+   * Currently active event for this browser context.
+   *
+   * @default null
+   */
   currentEvent: EventLog | null;
+  /**
+   * Active trace ID used for newly created sibling events.
+   *
+   * @default undefined
+   */
   traceId?: string;
 }
 
