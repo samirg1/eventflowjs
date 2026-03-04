@@ -4,6 +4,10 @@
   <img src="./Logo.png" alt="EventFlow logo" width="280" />
 </p>
 
+![NPM Downloads Weekly](https://img.shields.io/npm/dw/eventflowjs)
+![NPM Version](https://img.shields.io/npm/v/eventflowjs)
+![Dependencies](https://img.shields.io/badge/dependencies-0-blue)
+
 EventFlow is a lightweight TypeScript library for event lifecycle logging.
 
 Instead of scattering many log statements, you create one event, enrich it as work progresses, and emit a final structured log when complete.
