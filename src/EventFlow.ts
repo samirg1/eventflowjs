@@ -40,6 +40,7 @@ export class EventFlowClient<TAccount = never> {
     showFullErrorStack: true,
     branding: true,
   };
+  private encryptionKey?: string;
   private userContextMapper?: UserContextMapper<unknown>;
 
   constructor(
@@ -98,6 +99,31 @@ export class EventFlowClient<TAccount = never> {
 
     const record = EventRecord.fromLog(existing);
     record.mergeContext(data);
+    this.contextManager.setCurrentEvent(record.toLog());
+  }
+
+  /**
+   * Adds structured context fields that should be encrypted during propagation.
+   *
+   * Data remains decrypted on the active event and in emitted logs, but its
+   * values are encrypted in propagation headers, continuation tokens, and
+   * propagation metadata.
+   *
+   * Requires `configure({ encryptionKey })` to be set first. If no event is
+   * active, this call is a no-op.
+   *
+   * @param data Key-value context fields to merge into `encryptedContext`.
+   */
+  addEncryptedContext(data: EventContext): void {
+    const existing = this.contextManager.getCurrentEvent();
+    if (!existing) {
+      return;
+    }
+
+    this.assertEncryptionConfigured();
+
+    const record = EventRecord.fromLog(existing);
+    record.mergeEncryptedContext(data);
     this.contextManager.setCurrentEvent(record.toLog());
   }
 
@@ -228,6 +254,7 @@ export class EventFlowClient<TAccount = never> {
    * Current supported options:
    * - `showFullErrorStack` (default `true`)
    * - `branding` (default `true`, used by `ConsoleTransport`)
+   * - `encryptionKey` (optional shared key for `encryptedContext` propagation)
    * - `transports` (optional replacement transport or transports)
    *
    * @param options Partial configuration values to merge with current config.
@@ -243,6 +270,9 @@ export class EventFlowClient<TAccount = never> {
   ): void {
     if ("getUserContext" in options) {
       this.userContextMapper = options.getUserContext;
+    }
+    if ("encryptionKey" in options) {
+      this.encryptionKey = options.encryptionKey;
     }
 
     const nextConfig: Partial<EventFlowClientConfig> = {};
@@ -279,7 +309,9 @@ export class EventFlowClient<TAccount = never> {
       return {};
     }
 
-    return getPropagationHeaders(existing);
+    return getPropagationHeaders(existing, {
+      encryptionKey: this.encryptionKey,
+    });
   }
 
   /**
@@ -291,7 +323,9 @@ export class EventFlowClient<TAccount = never> {
    * propagation payload.
    */
   fromHeaders(headers: HeadersLike): EventLog | null {
-    const extracted = extractEventFromHeaders(headers);
+    const extracted = extractEventFromHeaders(headers, {
+      encryptionKey: this.encryptionKey,
+    });
     if (!extracted) {
       return null;
     }
@@ -314,7 +348,9 @@ export class EventFlowClient<TAccount = never> {
       return null;
     }
 
-    return serializeEvent(target);
+    return serializeEvent(target, {
+      encryptionKey: this.encryptionKey,
+    });
   }
 
   /**
@@ -324,7 +360,9 @@ export class EventFlowClient<TAccount = never> {
    * @returns Attached event log, or `null` if parsing fails.
    */
   continueFromToken(token: string): EventLog | null {
-    const parsed = deserializeEvent(token);
+    const parsed = deserializeEvent(token, {
+      encryptionKey: this.encryptionKey,
+    });
     if (!parsed) {
       return null;
     }
@@ -349,7 +387,10 @@ export class EventFlowClient<TAccount = never> {
       return {};
     }
 
-    return getPropagationMetadata(target, options);
+    return getPropagationMetadata(target, {
+      ...options,
+      encryptionKey: this.encryptionKey,
+    });
   }
 
   /**
@@ -360,7 +401,9 @@ export class EventFlowClient<TAccount = never> {
    * propagation payload.
    */
   fromMetadata(metadata: PropagationMetadataInput): EventLog | null {
-    const extracted = extractEventFromMetadata(metadata);
+    const extracted = extractEventFromMetadata(metadata, {
+      encryptionKey: this.encryptionKey,
+    });
     if (!extracted) {
       return null;
     }
@@ -548,6 +591,14 @@ export class EventFlowClient<TAccount = never> {
   private applyConfigToTransports(): void {
     for (const transport of this.transports) {
       transport.configure?.(this.config);
+    }
+  }
+
+  private assertEncryptionConfigured(): void {
+    if (!this.encryptionKey) {
+      throw new TypeError(
+        "EventFlow.addEncryptedContext requires configure({ encryptionKey }) before use.",
+      );
     }
   }
 }

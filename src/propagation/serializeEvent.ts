@@ -1,6 +1,10 @@
+import { encryptContextForPropagation } from "./encryptedContext.js";
 import type { EventLog, SerializedPropagationEvent } from "../types.js";
 
-export function serializeEvent(event: EventLog): string {
+export function serializeEvent(
+  event: EventLog,
+  options?: { encryptionKey?: string },
+): string {
   const payload: SerializedPropagationEvent = {
     id: event.id,
     name: event.name,
@@ -8,6 +12,10 @@ export function serializeEvent(event: EventLog): string {
     traceId: event.traceId,
     parentId: event.parentId,
     context: event.context,
+    encryptedContext: encryptContextForPropagation(
+      event.encryptedContext,
+      options?.encryptionKey,
+    ),
     steps: event.steps,
   };
 

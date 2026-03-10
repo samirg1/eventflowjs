@@ -1,8 +1,11 @@
 import { EventFlow } from "../src/index.js";
 
+EventFlow.configure({ encryptionKey: "shared-demo-key" });
+
 EventFlow.startEvent("checkout");
 EventFlow.step("press-pay");
 EventFlow.addContext({ cartId: "cart_1001" });
+EventFlow.addEncryptedContext({ paymentIntentSecret: "pi_secret_demo" });
 
 const requestHeaders = EventFlow.getPropagationHeaders();
 const serverResult = createPaymentIntentOnServer(requestHeaders);
@@ -26,6 +29,7 @@ function createPaymentIntentOnServer(headers: Record<string, string>): {
   EventFlow.step("create-payment-intent");
   const paymentId = `pi_${Math.random().toString(36).slice(2, 8)}`;
   EventFlow.addContext({ paymentId });
+  EventFlow.addEncryptedContext({ paymentIntentSecret: "pi_secret_demo" });
 
   const continuationToken = EventFlow.getContinuationToken() ?? "";
 

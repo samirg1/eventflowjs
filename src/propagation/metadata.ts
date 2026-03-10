@@ -1,3 +1,7 @@
+import {
+  decryptContextFromPropagation,
+  encryptContextForPropagation,
+} from "./encryptedContext.js";
 import type {
   EventLog,
   PropagationMetadata,
@@ -11,6 +15,7 @@ export const EVENTFLOW_EVENT_ID_KEY = "eventflow_event_id";
 export const EVENTFLOW_EVENT_NAME_KEY = "eventflow_event_name";
 export const EVENTFLOW_PARENT_ID_KEY = "eventflow_parent_id";
 export const EVENTFLOW_CONTEXT_KEY = "eventflow_context";
+export const EVENTFLOW_ENCRYPTED_CONTEXT_KEY = "eventflow_encrypted_context";
 
 const DEFAULT_MAX_METADATA_VALUE_LENGTH = 500;
 
@@ -38,6 +43,13 @@ export function getPropagationMetadata(
     if (context.length <= maxValueLength) {
       metadata[EVENTFLOW_CONTEXT_KEY] = context;
     }
+
+    const encryptedContext = JSON.stringify(
+      encryptContextForPropagation(event.encryptedContext, options.encryptionKey),
+    );
+    if (encryptedContext.length <= maxValueLength) {
+      metadata[EVENTFLOW_ENCRYPTED_CONTEXT_KEY] = encryptedContext;
+    }
   }
 
   return metadata;
@@ -45,6 +57,7 @@ export function getPropagationMetadata(
 
 export function extractEventFromMetadata(
   metadata: PropagationMetadataInput,
+  options?: { encryptionKey?: string },
 ): SerializedPropagationEvent | null {
   const traceId = toStringOrUndefined(metadata[EVENTFLOW_TRACE_ID_KEY]);
   const id = toStringOrUndefined(metadata[EVENTFLOW_EVENT_ID_KEY]);
@@ -61,6 +74,10 @@ export function extractEventFromMetadata(
     parentId: toStringOrUndefined(metadata[EVENTFLOW_PARENT_ID_KEY]),
     timestamp: new Date().toISOString(),
     context: parseContext(toStringOrUndefined(metadata[EVENTFLOW_CONTEXT_KEY])),
+    encryptedContext: parseEncryptedContext(
+      toStringOrUndefined(metadata[EVENTFLOW_ENCRYPTED_CONTEXT_KEY]),
+      options?.encryptionKey,
+    ),
     steps: [],
   };
 }
@@ -94,4 +111,23 @@ function parseContext(raw: string | undefined): Record<string, unknown> {
   }
 
   return {};
+}
+
+function parseEncryptedContext(
+  raw: string | undefined,
+  encryptionKey?: string,
+): Record<string, unknown> {
+  if (!raw) {
+    return {};
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+
+  return decryptContextFromPropagation(parsed, encryptionKey);
 }

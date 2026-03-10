@@ -1,3 +1,4 @@
+import { decryptContextFromPropagation } from "./encryptedContext.js";
 import type { EventContext, SerializedPropagationEvent, Step } from "../types.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -22,36 +23,46 @@ function toSteps(value: unknown): Step[] {
     });
 }
 
-export function deserializeEvent(data: string): SerializedPropagationEvent | null {
+export function deserializeEvent(
+  data: string,
+  options?: { encryptionKey?: string },
+): SerializedPropagationEvent | null {
+  let parsed: unknown;
+
   try {
-    const parsed: unknown = JSON.parse(data);
-    if (!isRecord(parsed)) {
-      return null;
-    }
-
-    const id = typeof parsed.id === "string" ? parsed.id : null;
-    const name = typeof parsed.name === "string" ? parsed.name : null;
-    const traceId = typeof parsed.traceId === "string" ? parsed.traceId : null;
-    const timestamp =
-      typeof parsed.timestamp === "string"
-        ? parsed.timestamp
-        : new Date().toISOString();
-
-    if (!id || !name || !traceId) {
-      return null;
-    }
-
-    return {
-      id,
-      name,
-      timestamp,
-      traceId,
-      parentId:
-        typeof parsed.parentId === "string" ? parsed.parentId : undefined,
-      context: toContext(parsed.context),
-      steps: toSteps(parsed.steps),
-    };
+    parsed = JSON.parse(data);
   } catch {
     return null;
   }
+
+  if (!isRecord(parsed)) {
+    return null;
+  }
+
+  const id = typeof parsed.id === "string" ? parsed.id : null;
+  const name = typeof parsed.name === "string" ? parsed.name : null;
+  const traceId = typeof parsed.traceId === "string" ? parsed.traceId : null;
+  const timestamp =
+    typeof parsed.timestamp === "string"
+      ? parsed.timestamp
+      : new Date().toISOString();
+
+  if (!id || !name || !traceId) {
+    return null;
+  }
+
+  return {
+    id,
+    name,
+    timestamp,
+    traceId,
+    parentId:
+      typeof parsed.parentId === "string" ? parsed.parentId : undefined,
+    context: toContext(parsed.context),
+    encryptedContext: decryptContextFromPropagation(
+      parsed.encryptedContext,
+      options?.encryptionKey,
+    ),
+    steps: toSteps(parsed.steps),
+  };
 }

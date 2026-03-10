@@ -21,6 +21,7 @@ export { serializeEvent } from "./propagation/serializeEvent.js";
 export { deserializeEvent } from "./propagation/deserializeEvent.js";
 export {
   EVENTFLOW_CONTEXT_KEY,
+  EVENTFLOW_ENCRYPTED_CONTEXT_KEY,
   EVENTFLOW_EVENT_ID_KEY,
   EVENTFLOW_EVENT_NAME_KEY,
   EVENTFLOW_PARENT_ID_KEY,
@@ -33,6 +34,7 @@ export {
   EVENT_ID_HEADER,
   TRACE_ID_HEADER,
   CONTEXT_HEADER,
+  ENCRYPTED_CONTEXT_HEADER,
   getPropagationHeaders,
   extractEventFromHeaders,
 } from "./propagation/headers.js";

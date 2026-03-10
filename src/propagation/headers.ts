@@ -1,4 +1,5 @@
 import { deserializeEvent } from "./deserializeEvent.js";
+import { decryptContextFromPropagation, encryptContextForPropagation } from "./encryptedContext.js";
 import { serializeEvent } from "./serializeEvent.js";
 import type {
   EventContext,
@@ -11,27 +12,40 @@ import type {
 export const TRACE_ID_HEADER = "x-eventflow-trace-id";
 export const EVENT_ID_HEADER = "x-eventflow-event-id";
 export const CONTEXT_HEADER = "x-eventflow-context";
+export const ENCRYPTED_CONTEXT_HEADER = "x-eventflow-encrypted-context";
 export const EVENT_HEADER = "x-eventflow-event";
 
-export function getPropagationHeaders(event: EventLog): Record<string, string> {
+export function getPropagationHeaders(
+  event: EventLog,
+  options?: { encryptionKey?: string },
+): Record<string, string> {
   return {
     [TRACE_ID_HEADER]: event.traceId,
     [EVENT_ID_HEADER]: event.id,
     [CONTEXT_HEADER]: JSON.stringify(event.context),
-    [EVENT_HEADER]: serializeEvent(event),
+    [ENCRYPTED_CONTEXT_HEADER]: JSON.stringify(
+      encryptContextForPropagation(event.encryptedContext, options?.encryptionKey),
+    ),
+    [EVENT_HEADER]: serializeEvent(event, options),
   };
 }
 
 export function extractEventFromHeaders(
   headers: HeadersLike,
+  options?: { encryptionKey?: string },
 ): SerializedPropagationEvent | null {
   const traceId = getHeader(headers, TRACE_ID_HEADER);
   const eventId = getHeader(headers, EVENT_ID_HEADER);
   const contextRaw = getHeader(headers, CONTEXT_HEADER);
+  const encryptedContextRaw = getHeader(headers, ENCRYPTED_CONTEXT_HEADER);
   const eventRaw = getHeader(headers, EVENT_HEADER);
 
   const parsedContext = parseContext(contextRaw);
-  const parsedEvent = eventRaw ? deserializeEvent(eventRaw) : null;
+  const parsedEncryptedContext = parseEncryptedContext(
+    encryptedContextRaw,
+    options?.encryptionKey,
+  );
+  const parsedEvent = eventRaw ? deserializeEvent(eventRaw, options) : null;
 
   if (parsedEvent) {
     return {
@@ -41,6 +55,10 @@ export function extractEventFromHeaders(
       context: {
         ...parsedEvent.context,
         ...parsedContext,
+      },
+      encryptedContext: {
+        ...parsedEvent.encryptedContext,
+        ...parsedEncryptedContext,
       },
     };
   }
@@ -55,6 +73,7 @@ export function extractEventFromHeaders(
     traceId,
     timestamp: new Date().toISOString(),
     context: parsedContext,
+    encryptedContext: parsedEncryptedContext,
     steps: [],
   };
 }
@@ -74,6 +93,25 @@ function parseContext(raw: string | undefined): EventContext {
   }
 
   return {};
+}
+
+function parseEncryptedContext(
+  raw: string | undefined,
+  encryptionKey?: string,
+): EventContext {
+  if (!raw) {
+    return {};
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+
+  return decryptContextFromPropagation(parsed, encryptionKey);
 }
 
 function getHeader(headers: HeadersLike, name: string): string | undefined {

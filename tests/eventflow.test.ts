@@ -7,6 +7,7 @@ import {
   type EventFlowClient,
   eventFlowMiddleware,
   extractEventFromHeaders,
+  getPropagationHeaders,
   serializeEvent,
   deserializeEvent,
   type EventLog,
@@ -53,12 +54,14 @@ describe("EventFlow", () => {
         configure(options: {
           showFullErrorStack?: boolean;
           branding?: boolean;
+          encryptionKey?: string;
           getUserContext?: undefined;
         }): void;
       }
     ).configure({
       showFullErrorStack: true,
       branding: true,
+      encryptionKey: undefined,
       getUserContext: undefined,
     });
   });
@@ -145,6 +148,16 @@ describe("EventFlow", () => {
     expect(memory.events).toHaveLength(0);
   });
 
+  it("throws when addEncryptedContext is called before configuring encryptionKey", () => {
+    EventFlow.startEvent("missing-encryption-key");
+
+    expect(() => {
+      EventFlow.addEncryptedContext({ secret: "shh" });
+    }).toThrow(
+      "EventFlow.addEncryptedContext requires configure({ encryptionKey }) before use.",
+    );
+  });
+
   it("warns and overwrites existing context.user when adding user context", () => {
     type Account = { uid: string; email: string };
 
@@ -209,6 +222,31 @@ describe("EventFlow", () => {
     expect(failed?.error?.message).toBe("boom");
     expect(failed?.error?.stack).toContain("Error: boom");
     expect(memory.events[0].status).toBe("failed");
+  });
+
+  it("keeps encrypted context decrypted on the active event and emitted log", () => {
+    EventFlow.configure({ encryptionKey: "shared-secret" });
+    EventFlow.startEvent("encrypted-context");
+    EventFlow.addEncryptedContext({
+      secret: "sensitive-value",
+      profile: { plan: "pro" },
+    });
+
+    const current = EventFlow.getCurrentEvent();
+    const ended = EventFlow.endEvent();
+
+    expect(current?.encryptedContext).toEqual({
+      secret: "sensitive-value",
+      profile: { plan: "pro" },
+    });
+    expect(ended?.encryptedContext).toEqual({
+      secret: "sensitive-value",
+      profile: { plan: "pro" },
+    });
+    expect(memory.events[0].encryptedContext).toEqual({
+      secret: "sensitive-value",
+      profile: { plan: "pro" },
+    });
   });
 
   it("truncates error stack to two lines when configured", () => {
@@ -392,20 +430,28 @@ describe("EventFlow", () => {
   });
 
   it("serializes and deserializes propagated events", () => {
+    EventFlow.configure({ encryptionKey: "shared-secret" });
     EventFlow.startEvent("checkout");
     EventFlow.addContext({ cartId: "c1" });
+    EventFlow.addEncryptedContext({ clientSecret: "pi_secret_123" });
     EventFlow.step("prepare");
 
     const current = EventFlow.getCurrentEvent();
     expect(current).not.toBeNull();
 
-    const serialized = serializeEvent(current as EventLog);
-    const deserialized = deserializeEvent(serialized);
+    const serialized = serializeEvent(current as EventLog, {
+      encryptionKey: "shared-secret",
+    });
+    const deserialized = deserializeEvent(serialized, {
+      encryptionKey: "shared-secret",
+    });
 
     expect(deserialized).not.toBeNull();
     expect(deserialized?.id).toBe(current?.id);
     expect(deserialized?.name).toBe("checkout");
     expect(deserialized?.context.cartId).toBe("c1");
+    expect(deserialized?.encryptedContext.clientSecret).toBe("pi_secret_123");
+    expect(serialized).not.toContain("pi_secret_123");
   });
 
   it("extracts propagation data from headers and tolerates invalid context", () => {
@@ -419,6 +465,7 @@ describe("EventFlow", () => {
         traceId: "trc_abc",
         timestamp: new Date().toISOString(),
         context: { fromPayload: true },
+        encryptedContext: {},
         steps: [],
       }),
     };
@@ -446,20 +493,25 @@ describe("EventFlow", () => {
   });
 
   it("can attach an event from headers and continue it", () => {
+    EventFlow.configure({ encryptionKey: "shared-secret" });
     const timestamp = new Date().toISOString();
-    const headers = {
-      "x-eventflow-event": JSON.stringify({
+    const headers = getPropagationHeaders(
+      {
         id: "evt_client",
         name: "checkout",
-        traceId: "trc_shared",
+        status: "success",
         timestamp,
+        duration_ms: 0,
         context: { cartId: "c42" },
+        encryptedContext: { clientSecret: "pi_secret_123" },
         steps: [{ name: "prepare", t: 10 }],
-      }),
-      "x-eventflow-event-id": "evt_client",
-      "x-eventflow-trace-id": "trc_shared",
-      "x-eventflow-context": JSON.stringify({ source: "server" }),
-    };
+        traceId: "trc_shared",
+      } as EventLog,
+      {
+        encryptionKey: "shared-secret",
+      },
+    );
+    headers["x-eventflow-context"] = JSON.stringify({ source: "server" });
 
     const attached = EventFlow.fromHeaders(headers);
     EventFlow.step("validate-payment");
@@ -469,6 +521,7 @@ describe("EventFlow", () => {
     expect(ended?.id).toBe("evt_client");
     expect(ended?.traceId).toBe("trc_shared");
     expect(ended?.context).toEqual({ cartId: "c42", source: "server" });
+    expect(ended?.encryptedContext).toEqual({ clientSecret: "pi_secret_123" });
     expect(ended?.steps.at(-1)?.name).toBe("validate-payment");
   });
 
@@ -496,20 +549,28 @@ describe("EventFlow", () => {
   });
 
   it("middleware keeps propagated event id and trace id", () => {
+    EventFlow.configure({ encryptionKey: "shared-secret" });
+    const encryptedHeaders = getPropagationHeaders(
+      {
+        id: "evt_client",
+        name: "checkout",
+        status: "success",
+        timestamp: new Date().toISOString(),
+        duration_ms: 0,
+        context: { cartId: "c99" },
+        encryptedContext: { clientSecret: "pi_secret_99" },
+        steps: [],
+        traceId: "trc_shared",
+      } as EventLog,
+      {
+        encryptionKey: "shared-secret",
+      },
+    );
     const req = {
       method: "POST",
       url: "/checkout",
       headers: {
-        "x-eventflow-event": JSON.stringify({
-          id: "evt_client",
-          name: "checkout",
-          traceId: "trc_shared",
-          timestamp: new Date().toISOString(),
-          context: { cartId: "c99" },
-          steps: [],
-        }),
-        "x-eventflow-event-id": "evt_client",
-        "x-eventflow-trace-id": "trc_shared",
+        ...encryptedHeaders,
         "x-eventflow-context": JSON.stringify({ source: "browser" }),
       },
     };
@@ -530,6 +591,9 @@ describe("EventFlow", () => {
       method: "POST",
       url: "/checkout",
     });
+    expect(memory.events[0].encryptedContext).toMatchObject({
+      clientSecret: "pi_secret_99",
+    });
   });
 
   it("middleware marks event failed on 5xx responses", () => {
@@ -545,9 +609,11 @@ describe("EventFlow", () => {
   });
 
   it("continues an event from a server token back on the client", () => {
+    EventFlow.configure({ encryptionKey: "shared-secret" });
     EventFlow.startEvent("checkout");
     EventFlow.step("press-pay");
     EventFlow.addContext({ cartId: "c123" });
+    EventFlow.addEncryptedContext({ clientSecret: "pi_secret_123" });
 
     const token = EventFlow.getContinuationToken();
     expect(token).toBeTypeOf("string");
@@ -566,11 +632,16 @@ describe("EventFlow", () => {
       "show-payment-sheet",
       "process-payment",
     ]);
+    expect(ended?.encryptedContext).toEqual({
+      clientSecret: "pi_secret_123",
+    });
   });
 
   it("creates and consumes generic metadata for webhook continuation", () => {
+    EventFlow.configure({ encryptionKey: "shared-secret" });
     EventFlow.startEvent("checkout");
     EventFlow.addContext({ orderId: "ord_1", userId: 9 });
+    EventFlow.addEncryptedContext({ paymentIntentSecret: "secret_pi" });
     const metadata = EventFlow.getPropagationMetadata();
     EventFlow.endEvent();
 
@@ -583,11 +654,30 @@ describe("EventFlow", () => {
     expect(ended?.traceId).toBe(attached?.traceId);
     expect(ended?.name).toBe("checkout");
     expect(ended?.context).toMatchObject({ orderId: "ord_1", userId: 9 });
+    expect(ended?.encryptedContext).toMatchObject({
+      paymentIntentSecret: "secret_pi",
+    });
+    expect(JSON.stringify(metadata)).not.toContain("secret_pi");
   });
 
   it("returns null when continuation token is invalid", () => {
     const attached = EventFlow.continueFromToken("{not-json}");
     expect(attached).toBeNull();
+  });
+
+  it("throws when encrypted propagation is restored without the shared key", () => {
+    EventFlow.configure({ encryptionKey: "shared-secret" });
+    EventFlow.startEvent("checkout");
+    EventFlow.addEncryptedContext({ clientSecret: "pi_secret_123" });
+    const token = EventFlow.getContinuationToken() as string;
+
+    EventFlow.configure({ encryptionKey: undefined });
+
+    expect(() => {
+      EventFlow.continueFromToken(token);
+    }).toThrow(
+      "EventFlow encrypted context requires configure({ encryptionKey }) with the shared key.",
+    );
   });
 
   it("runs a named step with callback and returns result", async () => {

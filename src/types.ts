@@ -83,6 +83,10 @@ export interface EventLog {
    */
   context: EventContext;
   /**
+   * Shallow-merged context object that is encrypted during propagation.
+   */
+  encryptedContext: EventContext;
+  /**
    * Recorded lifecycle steps in capture order.
    */
   steps: Step[];
@@ -179,6 +183,10 @@ export interface EventFlowClientConfigureOptions
    */
   transports?: Transport | Transport[];
   /**
+   * Shared symmetric key used to encrypt `encryptedContext` during propagation.
+   */
+  encryptionKey?: string;
+  /**
    * Disallowed in this overload. Use
    * `EventFlowClientConfigureWithUserContext<TAccount>` to configure it.
    */
@@ -204,6 +212,10 @@ export interface EventFlowClientConfigureWithUserContext<TAccount>
    * Replaces the client transport(s) when provided.
    */
   transports?: Transport | Transport[];
+  /**
+   * Shared symmetric key used to encrypt `encryptedContext` during propagation.
+   */
+  encryptionKey?: string;
   /**
    * Mapper used by `addUserContext(account)` to populate `context.user`.
    */
@@ -335,6 +347,10 @@ export interface SerializedPropagationEvent {
    */
   context: EventContext;
   /**
+   * Propagated encrypted context payload after decryption.
+   */
+  encryptedContext: EventContext;
+  /**
    * Propagated steps (often empty during transport).
    */
   steps: Step[];
@@ -465,6 +481,10 @@ export interface PropagationMetadataOptions {
    * @default 500
    */
   maxValueLength?: number;
+  /**
+   * Shared symmetric key used to encrypt `encryptedContext` metadata.
+   */
+  encryptionKey?: string;
 }
 
 /**

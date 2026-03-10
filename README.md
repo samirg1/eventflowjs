@@ -77,6 +77,7 @@ EventFlow.configure({
 
 ## Example Fullstack Flow w/ Stripe
 
+
 ### Send event to API
 
 ```ts
@@ -86,7 +87,7 @@ EventFlow.step("client.user_press_checkout");
 EventFlow.addContext({ cartID });
 EventFlow.addUserContext(user); // see configuration
 EventFlow.step("client.create_payment_intent");
-const { paymentIntentID, continuationToken } = await fetch(
+const { paymentIntentID, clientSecret, continuationToken } = await fetch(
     "/api/createPaymentIntent",
     {
         method: "POST",
@@ -116,10 +117,14 @@ app.post("/createPaymentIntent", async (req, res) => {
         ...
     });
 
+    const clientSecret = process.env.STRIPE_CLIENT_SECRET;
+    const paymentIntentID = paymentIntent.id;
+
     EventFlow.step("api.sending_back_to_client");
-    EventFlow.addContext({ paymentIntentID: paymentIntent.id });
+    EventFlow.addContext({ paymentIntentID });
+    EventFlow.addEncryptedContext({ clientSecret })
     const continuationToken = EventFlow.getContinuationToken();
-    res.json({ paymentIntentID: paymentIntent.id, continuationToken });
+    res.json({ paymentIntentID, clientSecret, continuationToken });
 });
 ```
 
@@ -130,7 +135,7 @@ app.post("/createPaymentIntent", async (req, res) => {
 EventFlow.continueFromToken(continuationToken);
 EventFlow.addContext({ paymentIntentID });
 EventFlow.step("client.present_payment_sheet");
-const { error } = await presentPaymentSheet(paymentIntentID);
+const { error } = await presentPaymentSheet(paymentIntentID, clientSecret);
 if (error) return handleError(error);
 
 EventFlow.step("client.payment_success");
@@ -169,14 +174,19 @@ Note 3 emissions
   "duration_ms": 4678, // for webhook, client/api will be shorter
   "context": {
     "cartID": "abc123",
-    "userID": "abc123",
-    "email": "test@example.com",
+    "user": {
+        "userID": "abc123",
+        "email": "test@example.com",
+    },
     "body": {
         "amount": 2500,
         "currency": "AUD"
     },
     "paymentIntentID": "pi_12345",
     "receiptNumber": "r_12345", // webhook only
+  },
+  "encryptedContext": {
+    "clientSecret": "pi_secret_12345" // api/client only
   },
   "steps": [
     { "name": "client.user_press_checkout", "t": 30 },
@@ -223,6 +233,7 @@ const AppEventFlow: EventFlowClient<User> = EventFlow;
 AppEventFlow.configure({
   showFullErrorStack: false,
   branding: false,
+  encryptionKey: "shared-eventflow-key",
   getUserContext: (user) => ({
     email: user.email,
     id: user.uid,
@@ -240,10 +251,35 @@ EventFlow.endEvent();
 `showFullErrorStack` defaults to `true`. When set to `false`, emitted failed events include only the first two lines of `error.stack`.
 `branding` defaults to `true`. When set to `false`, `ConsoleTransport` logs raw JSON without the `[EventFlow]` prefix.
 `transports` optionally replaces active transport(s) in the same configure call (equivalent to calling `setTransport(...)`).
+`encryptionKey` is optional. When set, `encryptedContext` is encrypted in propagation headers, continuation tokens, and propagation metadata, then decrypted again in `fromHeaders`, `continueFromToken`, and `fromMetadata`.
 `getUserContext` configures `addUserContext(account)` to map your app-level user/account object into `context.user`.
 When `context.user` already exists, `addUserContext` overwrites it and logs a warning.
 
 TypeScript note: assertion-based narrowing requires an explicitly typed local reference (for example, `const AppEventFlow: EventFlowClient<User> = EventFlow;`). Configure and use that reference in the same scope for typed `addUserContext(...)` calls.
+
+## Encrypted Context
+
+Use `addEncryptedContext` when fields should stay readable in emitted logs but be encrypted while crossing service boundaries.
+
+```ts
+EventFlow.configure({ encryptionKey: "shared-eventflow-key" });
+
+EventFlow.startEvent("checkout");
+EventFlow.addContext({ cartId: "cart_1001" });
+EventFlow.addEncryptedContext({
+  customerEmail: "test@example.com",
+  paymentIntentSecret: "pi_secret_123",
+});
+
+const headers = EventFlow.getPropagationHeaders();
+// `headers` now contain encrypted `encryptedContext` values.
+
+EventFlow.fromHeaders(headers);
+console.log(EventFlow.getCurrentEvent()?.encryptedContext.paymentIntentSecret);
+// "pi_secret_123"
+```
+
+`context` and `encryptedContext` are separate event fields. EventFlow encrypts only the values inside `encryptedContext`; key names remain visible so downstream services know which fields belong in the encrypted bucket.
 
 ## Run Helper
 
@@ -319,12 +355,12 @@ If you're having issues in React-Native you can import from `eventflowjs/react-n
 | Function                                      | Description                                       | Arguments                                                                     | Returns                              |
 | --------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------ |
 | `createEventFlowMiddleware(client, options?)` | Factory for custom middleware behavior.           | `client: compatible EventFlow client`, `options?: EventFlowMiddlewareOptions` | `EventFlowMiddleware`                |
-| `serializeEvent(event)`                       | Serializes an event payload for transport.        | `event: EventLog`                                                             | `string`                             |
-| `deserializeEvent(data)`                      | Parses serialized propagation payload safely.     | `data: string`                                                                | `SerializedPropagationEvent or null` |
-| `getPropagationHeaders(event)`                | Builds header propagation map from event.         | `event: EventLog`                                                             | `Record<string, string>`             |
-| `extractEventFromHeaders(headers)`            | Rehydrates propagation payload from headers.      | `headers: HeadersLike`                                                        | `SerializedPropagationEvent or null` |
+| `serializeEvent(event, options?)`             | Serializes an event payload for transport.        | `event: EventLog`, `options?: { encryptionKey?: string }`                     | `string`                             |
+| `deserializeEvent(data, options?)`            | Parses serialized propagation payload safely.     | `data: string`, `options?: { encryptionKey?: string }`                        | `SerializedPropagationEvent or null` |
+| `getPropagationHeaders(event, options?)`      | Builds header propagation map from event.         | `event: EventLog`, `options?: { encryptionKey?: string }`                     | `Record<string, string>`             |
+| `extractEventFromHeaders(headers, options?)`  | Rehydrates propagation payload from headers.      | `headers: HeadersLike`, `options?: { encryptionKey?: string }`                | `SerializedPropagationEvent or null` |
 | `getPropagationMetadata(event, options?)`     | Builds metadata propagation map from event.       | `event: EventLog`, `options?: PropagationMetadataOptions`                     | `PropagationMetadata`                |
-| `extractEventFromMetadata(metadata)`          | Rehydrates propagation payload from metadata map. | `metadata: PropagationMetadataInput`                                          | `SerializedPropagationEvent or null` |
+| `extractEventFromMetadata(metadata, options?)`| Rehydrates propagation payload from metadata map. | `metadata: PropagationMetadataInput`, `options?: { encryptionKey?: string }`  | `SerializedPropagationEvent or null` |
 
 ### `EventFlow` Methods
 
@@ -332,6 +368,7 @@ If you're having issues in React-Native you can import from `eventflowjs/react-n
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------- |
 | `startEvent(name)`                         | Starts a new event. Auto-cancels and emits any currently active event first.                                                                      | `name: string`                                                           | `EventLog`                |
 | `addContext(data)`                         | Shallow-merges context into the active event. No-op if no active event exists.                                                                    | `data: EventContext`                                                     | `void`                    |
+| `addEncryptedContext(data)`                | Shallow-merges data into `encryptedContext`. Throws if `encryptionKey` is not configured. No-op if no event is active.                           | `data: EventContext`                                                     | `void`                    |
 | `addUserContext(account)`                  | Maps a configured user/account object and writes it to `context.user`. Throws if `getUserContext` is not configured. No-op if no event is active. | `account: TAccount`                                                      | `void`                    |
 | `step(name)`                               | Appends a step with elapsed time from event start.                                                                                                | `name: string`                                                           | `void`                    |
 | `endEvent(status?)`                        | Completes and emits the active event.                                                                                                             | `status?: EventStatus` (default `"success"`)                             | `EventLog or null`        |
@@ -366,6 +403,7 @@ If you're having issues in React-Native you can import from `eventflowjs/react-n
 | `showFullErrorStack` | `boolean` | `true`  | When `false`, failed events include only the first two lines of `error.stack`. |
 | `branding`           | `boolean` | `true`  | When `false`, `ConsoleTransport` logs plain JSON without the branding prefix.  |
 | `transports`         | `Transport \| Transport[]` | n/a | Replaces active transport(s), same as calling `setTransport(...)`. |
+| `encryptionKey`      | `string`  | n/a     | Shared symmetric key used to encrypt `encryptedContext` during propagation. |
 
 ### `EventFlowClientConfigureWithUserContext<TAccount>`
 
@@ -374,6 +412,7 @@ If you're having issues in React-Native you can import from `eventflowjs/react-n
 | `showFullErrorStack` | `boolean`                             | `true`   | Same as `EventFlowClientConfigureOptions`.                                                          |
 | `branding`           | `boolean`                             | `true`   | Same as `EventFlowClientConfigureOptions`.                                                          |
 | `transports`         | `Transport \| Transport[]`            | n/a      | Same as `EventFlowClientConfigureOptions`; also works alongside `getUserContext`.                  |
+| `encryptionKey`      | `string`                              | n/a      | Same as `EventFlowClientConfigureOptions`; encrypts `encryptedContext` during propagation.         |
 | `getUserContext`     | `(account: TAccount) => EventContext` | required | Maps your user/account object into the payload used by `addUserContext(account)` at `context.user`. |
 
 ### `TransportEmissionOptions`
@@ -418,12 +457,14 @@ If you're having issues in React-Native you can import from `eventflowjs/react-n
 | `TRACE_ID_HEADER`          | `"x-eventflow-trace-id"` |
 | `EVENT_ID_HEADER`          | `"x-eventflow-event-id"` |
 | `CONTEXT_HEADER`           | `"x-eventflow-context"`  |
+| `ENCRYPTED_CONTEXT_HEADER` | `"x-eventflow-encrypted-context"` |
 | `EVENT_HEADER`             | `"x-eventflow-event"`    |
 | `EVENTFLOW_TRACE_ID_KEY`   | `"eventflow_trace_id"`   |
 | `EVENTFLOW_EVENT_ID_KEY`   | `"eventflow_event_id"`   |
 | `EVENTFLOW_EVENT_NAME_KEY` | `"eventflow_event_name"` |
 | `EVENTFLOW_PARENT_ID_KEY`  | `"eventflow_parent_id"`  |
 | `EVENTFLOW_CONTEXT_KEY`    | `"eventflow_context"`    |
+| `EVENTFLOW_ENCRYPTED_CONTEXT_KEY` | `"eventflow_encrypted_context"` |
 
 ### Exported Types
 

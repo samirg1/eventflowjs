@@ -42,6 +42,12 @@ interface EventRecordParams {
    */
   context?: EventContext;
   /**
+   * Initial encrypted event context.
+   *
+   * @default {}
+   */
+  encryptedContext?: EventContext;
+  /**
    * Initial steps list.
    *
    * @default []
@@ -84,6 +90,7 @@ export class EventRecord {
   private readonly traceId: string;
   private readonly parentId?: string;
   private context: EventContext;
+  private encryptedContext: EventContext;
   private steps: Step[];
   private status: EventStatus;
   private durationMs: number;
@@ -105,6 +112,7 @@ export class EventRecord {
     this.timestamp = timestamp;
     this.startedAtMs = startedAtMs;
     this.context = { ...(params.context ?? {}) };
+    this.encryptedContext = { ...(params.encryptedContext ?? {}) };
     this.steps = [...(params.steps ?? [])];
     this.caller = params.caller;
     this.error = params.error;
@@ -125,6 +133,7 @@ export class EventRecord {
       parentId: event.parentId,
       timestamp: event.timestamp,
       context: event.context,
+      encryptedContext: event.encryptedContext,
       steps: event.steps,
       caller: event.caller,
       error: event.error,
@@ -143,6 +152,7 @@ export class EventRecord {
       parentId: event.parentId,
       timestamp: event.timestamp,
       context: event.context,
+      encryptedContext: event.encryptedContext,
       steps: event.steps,
       startedAtMs: Number.isNaN(parsedStart) ? Date.now() : parsedStart,
     });
@@ -151,6 +161,13 @@ export class EventRecord {
   mergeContext(data: EventContext): void {
     this.context = {
       ...this.context,
+      ...data,
+    };
+  }
+
+  mergeEncryptedContext(data: EventContext): void {
+    this.encryptedContext = {
+      ...this.encryptedContext,
       ...data,
     };
   }
@@ -180,6 +197,7 @@ export class EventRecord {
       duration_ms: this.durationMs,
       status: this.status,
       context: { ...this.context },
+      encryptedContext: { ...this.encryptedContext },
       steps: [...this.steps],
       error: this.error,
       caller: this.caller,
