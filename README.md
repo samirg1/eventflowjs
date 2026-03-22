@@ -82,11 +82,13 @@ EventFlow.configure({
 
 ```ts
 // client/src/components/CartCheckout.tsx
+EventFlow.configure({ prefix: "client." });
+
 EventFlow.startEvent("user_checkout");
-EventFlow.step("client.user_press_checkout");
+EventFlow.step("user_press_checkout");
 EventFlow.addContext({ cartID });
 EventFlow.addUserContext(user); // see configuration
-EventFlow.step("client.create_payment_intent");
+EventFlow.step("create_payment_intent");
 const { paymentIntentID, clientSecret, continuationToken } = await fetch(
     "/api/createPaymentIntent",
     {
@@ -101,13 +103,15 @@ const { paymentIntentID, clientSecret, continuationToken } = await fetch(
 
 ```ts
 // api/index.ts
-import { eventFlowMiddleware } from "eventflowjs";
+import { EventFlow, eventFlowMiddleware } from "eventflowjs";
+
+EventFlow.configure({ prefix: "api." });
 app.use(eventFlowMiddleware);
 
 // api/routes/createPaymentIntent.ts
 app.post("/createPaymentIntent", async (req, res) => {
     const body = req.body;
-    EventFlow.step("api.received_create_pi")
+    EventFlow.step("received_create_pi")
     EventFlow.addContext({ body });
 
     const metadata = EventFlow.getPropagationMetadata();
@@ -120,7 +124,7 @@ app.post("/createPaymentIntent", async (req, res) => {
     const clientSecret = process.env.STRIPE_CLIENT_SECRET;
     const paymentIntentID = paymentIntent.id;
 
-    EventFlow.step("api.sending_back_to_client");
+    EventFlow.step("sending_back_to_client");
     EventFlow.addContext({ paymentIntentID });
     EventFlow.addEncryptedContext({ clientSecret })
     const continuationToken = EventFlow.getContinuationToken();
@@ -132,13 +136,14 @@ app.post("/createPaymentIntent", async (req, res) => {
 
 ```ts
 // client/src/components/CartCheckout.tsx
+EventFlow.configure({ prefix: "client." });
 EventFlow.continueFromToken(continuationToken);
 EventFlow.addContext({ paymentIntentID });
-EventFlow.step("client.present_payment_sheet");
+EventFlow.step("present_payment_sheet");
 const { error } = await presentPaymentSheet(paymentIntentID, clientSecret);
 if (error) return handleError(error);
 
-EventFlow.step("client.payment_success");
+EventFlow.step("payment_success");
 EventFlow.endEvent();
 ```
 
@@ -238,6 +243,7 @@ AppEventFlow.configure({
     email: user.email,
     id: user.uid,
   }),
+  prefix: "client.",
 });
 
 export { AppEventFlow as EventFlow };
@@ -250,6 +256,7 @@ EventFlow.endEvent();
 
 `showFullErrorStack` defaults to `true`. When set to `false`, emitted failed events include only the first two lines of `error.stack`.
 `branding` defaults to `true`. When set to `false`, `ConsoleTransport` logs raw JSON without the `[EventFlow]` prefix.
+`prefix` defaults to `""`. When set, EventFlow prepends it to every `step(...)` name.
 `transports` optionally replaces active transport(s) in the same configure call (equivalent to calling `setTransport(...)`).
 `encryptionKey` is optional. When set, `encryptedContext` is encrypted in propagation headers, continuation tokens, and propagation metadata, then decrypted again in `fromHeaders`, `continueFromToken`, and `fromMetadata`.
 `getUserContext` configures `addUserContext(account)` to map your app-level user/account object into `context.user`.
@@ -370,7 +377,7 @@ If you're having issues in React-Native you can import from `eventflowjs/react-n
 | `addContext(data)`                         | Shallow-merges context into the active event. No-op if no active event exists.                                                                    | `data: EventContext`                                                     | `void`                    |
 | `addEncryptedContext(data)`                | Shallow-merges data into `encryptedContext`. Throws if `encryptionKey` is not configured. No-op if no event is active.                           | `data: EventContext`                                                     | `void`                    |
 | `addUserContext(account)`                  | Maps a configured user/account object and writes it to `context.user`. Throws if `getUserContext` is not configured. No-op if no event is active. | `account: TAccount`                                                      | `void`                    |
-| `step(name)`                               | Appends a step with elapsed time from event start.                                                                                                | `name: string`                                                           | `void`                    |
+| `step(name)`                               | Appends a step with elapsed time from event start. If `configure({ prefix })` is set, the prefix is prepended automatically.                     | `name: string`                                                           | `void`                    |
 | `endEvent(status?)`                        | Completes and emits the active event.                                                                                                             | `status?: EventStatus` (default `"success"`)                             | `EventLog or null`        |
 | `fail(error)`                              | Marks active event as failed, captures error, emits, clears current event.                                                                        | `error: unknown`                                                         | `EventLog or null`        |
 | `configure(options)`                       | Updates client-level behavior settings.                                                                                                           | `options: EventFlowClientConfigureOptions`                               | `void`                    |
@@ -402,6 +409,7 @@ If you're having issues in React-Native you can import from `eventflowjs/react-n
 | -------------------- | --------- | ------- | ------------------------------------------------------------------------------ |
 | `showFullErrorStack` | `boolean` | `true`  | When `false`, failed events include only the first two lines of `error.stack`. |
 | `branding`           | `boolean` | `true`  | When `false`, `ConsoleTransport` logs plain JSON without the branding prefix.  |
+| `prefix`             | `string`  | `""`    | Prepends the configured text to each `step(...)` name. |
 | `transports`         | `Transport \| Transport[]` | n/a | Replaces active transport(s), same as calling `setTransport(...)`. |
 | `encryptionKey`      | `string`  | n/a     | Shared symmetric key used to encrypt `encryptedContext` during propagation. |
 
@@ -411,6 +419,7 @@ If you're having issues in React-Native you can import from `eventflowjs/react-n
 | -------------------- | ------------------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
 | `showFullErrorStack` | `boolean`                             | `true`   | Same as `EventFlowClientConfigureOptions`.                                                          |
 | `branding`           | `boolean`                             | `true`   | Same as `EventFlowClientConfigureOptions`.                                                          |
+| `prefix`             | `string`                              | `""`     | Same as `EventFlowClientConfigureOptions`; prepends step names recorded by this client.            |
 | `transports`         | `Transport \| Transport[]`            | n/a      | Same as `EventFlowClientConfigureOptions`; also works alongside `getUserContext`.                  |
 | `encryptionKey`      | `string`                              | n/a      | Same as `EventFlowClientConfigureOptions`; encrypts `encryptedContext` during propagation.         |
 | `getUserContext`     | `(account: TAccount) => EventContext` | required | Maps your user/account object into the payload used by `addUserContext(account)` at `context.user`. |

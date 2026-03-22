@@ -124,6 +124,12 @@ export interface EventFlowClientConfig {
    * @default true
    */
   branding: boolean;
+  /**
+   * Prepended to each step name recorded via `step(...)`.
+   *
+   * @default ""
+   */
+  prefix: string;
 }
 
 /**
@@ -173,7 +179,11 @@ export type UserContextMapper<TAccount> = (account: TAccount) => EventContext;
  *
  * @example
  * ```ts
- * EventFlow.configure({ showFullErrorStack: false, branding: true });
+ * EventFlow.configure({
+ *   showFullErrorStack: false,
+ *   branding: true,
+ *   prefix: "client: ",
+ * });
  * ```
  */
 export interface EventFlowClientConfigureOptions
@@ -384,6 +394,7 @@ export abstract class Transport {
   protected config: EventFlowClientConfig = {
     showFullErrorStack: true,
     branding: true,
+    prefix: "",
   };
   /**
    * Optional emission filters/sampling settings for this transport.

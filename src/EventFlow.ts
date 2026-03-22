@@ -39,6 +39,7 @@ export class EventFlowClient<TAccount = never> {
   private config: EventFlowClientConfig = {
     showFullErrorStack: true,
     branding: true,
+    prefix: "",
   };
   private encryptionKey?: string;
   private userContextMapper?: UserContextMapper<unknown>;
@@ -178,7 +179,7 @@ export class EventFlowClient<TAccount = never> {
     }
 
     const record = EventRecord.fromLog(existing);
-    record.addStep(name);
+    record.addStep(`${this.config.prefix}${name}`);
     this.contextManager.setCurrentEvent(record.toLog());
   }
 
@@ -254,6 +255,7 @@ export class EventFlowClient<TAccount = never> {
    * Current supported options:
    * - `showFullErrorStack` (default `true`)
    * - `branding` (default `true`, used by `ConsoleTransport`)
+   * - `prefix` (default `""`, prepended to `step(...)` names)
    * - `encryptionKey` (optional shared key for `encryptedContext` propagation)
    * - `transports` (optional replacement transport or transports)
    *
@@ -281,6 +283,9 @@ export class EventFlowClient<TAccount = never> {
     }
     if (options.branding !== undefined) {
       nextConfig.branding = options.branding;
+    }
+    if ("prefix" in options) {
+      nextConfig.prefix = options.prefix ?? "";
     }
 
     this.config = {

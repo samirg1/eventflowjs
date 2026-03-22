@@ -54,6 +54,7 @@ describe("EventFlow", () => {
         configure(options: {
           showFullErrorStack?: boolean;
           branding?: boolean;
+          prefix?: string;
           encryptionKey?: string;
           getUserContext?: undefined;
         }): void;
@@ -61,6 +62,7 @@ describe("EventFlow", () => {
     ).configure({
       showFullErrorStack: true,
       branding: true,
+      prefix: undefined,
       encryptionKey: undefined,
       getUserContext: undefined,
     });
@@ -211,6 +213,30 @@ describe("EventFlow", () => {
 
     expect(ended?.steps[0].t).toBeGreaterThanOrEqual(0);
     expect(ended?.steps[1].t).toBeGreaterThanOrEqual(ended?.steps[0].t ?? 0);
+  });
+
+  it("prepends configured prefix to recorded steps", () => {
+    EventFlow.configure({ prefix: "client: " });
+    EventFlow.startEvent("prefixed-steps");
+
+    EventFlow.step("checkout:start");
+
+    const ended = EventFlow.endEvent();
+
+    expect(ended?.steps).toHaveLength(1);
+    expect(ended?.steps[0].name).toBe("client: checkout:start");
+  });
+
+  it("clears the configured prefix when set to undefined", () => {
+    EventFlow.configure({ prefix: "client: " });
+    EventFlow.configure({ prefix: undefined });
+    EventFlow.startEvent("cleared-prefix");
+
+    EventFlow.step("checkout:start");
+
+    const ended = EventFlow.endEvent();
+
+    expect(ended?.steps[0].name).toBe("checkout:start");
   });
 
   it("captures error message and stack when failing", () => {
